@@ -1,3 +1,48 @@
+# ==========================================================================
+# 7) FASE 2 - Execucao de trades
+# ==========================================================================
+# Modo de seguranca: em DRY_RUN, o bot simula compras/vendas e regista tudo,
+# mas NUNCA assina nem envia transacoes reais. O valor por defeito e SEMPRE
+# True - so passa a False se o utilizador mudar isto explicitamente no .env.
+DRY_RUN = _env_texto("DRY_RUN", "true").lower() in ("1", "true", "yes", "sim")
+
+# Chave privada da wallet dedicada ao bot, em formato base58 (o formato que
+# o Phantom/Solflare mostram ao exportar). NUNCA a wallet principal.
+WALLET_PRIVATE_KEY = _env_texto("WALLET_PRIVATE_KEY")
+
+# Limite maximo (USD) que o bot pode gastar numa unica compra.
+MAX_TRADE_USD = _env_float("MAX_TRADE_USD", 5.0)
+
+# So compra automaticamente se o score de risco final for <= a este valor.
+SCORE_COMPRA_MAX = _env_int("SCORE_COMPRA_MAX", 20)
+
+# Stop-loss: vender tudo se a posicao cair esta percentagem desde a compra.
+STOP_LOSS_PCT = _env_float("STOP_LOSS_PCT", 20.0)
+
+# Take-profit: vender esta percentagem da posicao quando o preco multiplicar
+# por TAKE_PROFIT_MULTIPLICADOR (2.0 = dobrou / +100%).
+TAKE_PROFIT_MULTIPLICADOR = _env_float("TAKE_PROFIT_MULTIPLICADOR", 2.0)
+TAKE_PROFIT_VENDER_PCT = _env_float("TAKE_PROFIT_VENDER_PCT", 50.0)
+
+# Trailing stop (%) aplicado ao que sobra da posicao depois do take-profit,
+# medido a partir do pico de preco atingido.
+TRAILING_STOP_PCT = _env_float("TRAILING_STOP_PCT", 15.0)
+
+# Slippage maximo tolerado nos swaps (em basis points; 100 = 1%).
+SLIPPAGE_BPS = _env_int("SLIPPAGE_BPS", 500)
+
+# Ficheiro local (JSON) onde ficam guardadas as posicoes abertas.
+FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
+
+# Intervalo (segundos) entre cada verificacao das posicoes abertas
+# (stop-loss / take-profit), independente de aparecerem tokens novos.
+INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)
+
+
+def fase2_configurada() -> bool:
+    """True se houver uma chave de wallet definida (mesmo em dry-run, e
+    preciso para simular saldos/enderecos de forma realista)."""
+    return bool(WALLET_PRIVATE_KEY)
 """
 config.py
 =========
@@ -154,3 +199,50 @@ def resumo() -> str:
 if __name__ == "__main__":
     print("=== Configuracao carregada ===")
     print(resumo())
+# ==========================================================================
+# 7) FASE 2 - Execucao de trades
+# ==========================================================================
+# Modo de seguranca: em DRY_RUN, o bot simula compras/vendas e regista tudo,
+# mas NUNCA assina nem envia transacoes reais. O valor por defeito e SEMPRE
+# True - so passa a False se o utilizador mudar isto explicitamente no .env.
+DRY_RUN = _env_texto("DRY_RUN", "true").lower() in ("1", "true", "yes", "sim")
+
+# Chave privada da wallet dedicada ao bot, em formato base58 (o formato que
+# o Phantom/Solflare mostram ao exportar). NUNCA a wallet principal.
+WALLET_PRIVATE_KEY = _env_texto("WALLET_PRIVATE_KEY")
+
+# Limite maximo (USD) que o bot pode gastar numa unica compra.
+MAX_TRADE_USD = _env_float("MAX_TRADE_USD", 5.0)
+
+# So compra automaticamente se o score de risco final for <= a este valor.
+SCORE_COMPRA_MAX = _env_int("SCORE_COMPRA_MAX", 20)
+
+# Stop-loss: vender tudo se a posicao cair esta percentagem desde a compra.
+STOP_LOSS_PCT = _env_float("STOP_LOSS_PCT", 20.0)
+
+# Take-profit: vender esta percentagem da posicao quando o preco multiplicar
+# por TAKE_PROFIT_MULTIPLICADOR (2.0 = dobrou / +100%).
+TAKE_PROFIT_MULTIPLICADOR = _env_float("TAKE_PROFIT_MULTIPLICADOR", 2.0)
+TAKE_PROFIT_VENDER_PCT = _env_float("TAKE_PROFIT_VENDER_PCT", 50.0)
+
+# Trailing stop (%) aplicado ao que sobra da posicao depois do take-profit,
+# medido a partir do pico de preco atingido.
+TRAILING_STOP_PCT = _env_float("TRAILING_STOP_PCT", 15.0)
+
+# Slippage maximo tolerado nos swaps (em basis points; 100 = 1%).
+SLIPPAGE_BPS = _env_int("SLIPPAGE_BPS", 500)
+
+# Ficheiro local (JSON) onde ficam guardadas as posicoes abertas.
+FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
+
+# Intervalo (segundos) entre cada verificacao das posicoes abertas
+# (stop-loss / take-profit), independente de aparecerem tokens novos.
+INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)
+
+
+def fase2_configurada() -> bool:
+    """True se houver uma chave de wallet definida (mesmo em dry-run, e
+    preciso para simular saldos/enderecos de forma realista)."""
+    return bool(WALLET_PRIVATE_KEY)
+
+

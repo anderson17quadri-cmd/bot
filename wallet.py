@@ -1,0 +1,111 @@
+"""
+wallet.py  -  Gestao da wallet dedicada ao bot
+================================================
+Carrega a chave privada a partir do .env (NUNCA hardcoded) e da acesso a
+funcoes basicas: obter o endereco publico, consultar saldo em SOL.
+
+Requer 'solders' instalado (funciona bem dentro do proot Ubuntu; no Termux
+puro esta biblioteca pode falhar a compilar - ver notas do projeto).
+
+    pip install solders
+"""
+
+import base58
+import requests
+from solders.keypair import Keypair
+
+import config
+
+
+class WalletNaoConfiguradaError(Exception):
+    """A WALLET_PRIVATE_KEY nao esta definida no .env."""
+
+
+_keypair_cache = None
+
+
+def _carregar_keypair() -> Keypair:
+    """Cria (uma vez) o objeto Keypair a partir da chave privada em base58."""
+    global _keypair_cache
+    if _keypair_cache is not None:
+        return _keypair_cache
+
+    if not config.WALLET_PRIVATE_KEY:
+        raise WalletNaoConfiguradaError(
+            "WALLET_PRIVATE_KEY nao esta definida no .env. "
+            "Gera uma wallet NOVA e dedicada so a este bot - nunca uses a "
+            "tua wallet principal."
+        )
+
+    try:
+        bytes_chave = base58.b58decode(config.WALLET_PRIVATE_KEY)
+        _keypair_cache = Keypair.from_bytes(bytes_chave)
+    except Exception as e:
+        raise WalletNaoConfiguradaError(
+            f"WALLET_PRIVATE_KEY invalida: {e}"
+        ) from e
+
+    return _keypair_cache
+
+
+def endereco_publico() -> str:
+    """Devolve o endereco publico (base58) da wallet do bot."""
+    return str(_carregar_keypair().pubkey())
+
+
+def obter_keypair() -> Keypair:
+    """Devolve o objeto Keypair, usado pelo executor.py para assinar."""
+    return _carregar_keypair()
+
+
+def obter_saldo_sol() -> float:
+    """Consulta o saldo em SOL da wallet, via RPC (chamada HTTP direta,
+    sem SDK pesado)."""
+    endereco = endereco_publico()
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getBalance",
+        "params": [endereco],
+    }
+    resposta = requests.post(config.SOLANA_RPC_URL, json=payload, timeout=15)
+    resposta.raise_for_status()
+    dados = resposta.json()
+    lamports = dados.get("result", {}).get("value", 0)
+    return lamports / 1_000_000_000  # 1 SOL = 1e9 lamports
+
+
+def confirmar_wallet_dedicada() -> bool:
+    """Pede confirmacao explicita ao utilizador na primeira execucao, para
+    reduzir o risco de alguem usar por engano a wallet principal.
+
+    Devolve True se o utilizador confirmar, False caso contrario.
+    Esta funcao e interativa (input()) - so deve ser chamada uma vez, no
+    arranque do main.py, nao dentro de loops.
+    """
+    endereco = endereco_publico()
+    saldo = obter_saldo_sol()
+    print("=" * 60)
+    print("CONFIRMACAO DE WALLET")
+    print("=" * 60)
+    print(f"Endereco : {endereco}")
+    print(f"Saldo    : {saldo:.4f} SOL")
+    print()
+    print("Confirma que esta e uma wallet NOVA, criada so para este bot,")
+    print("e que NAO e a tua wallet principal / a que usas no dia a dia.")
+    print()
+    resposta = input("Escreve 'confirmo' para continuar: ").strip().lower()
+    return resposta == "confirmo"
+
+
+# --------------------------------------------------------------------------
+# Teste rapido:  python wallet.py
+# --------------------------------------------------------------------------
+if __name__ == "__main__":
+    try:
+        print("Endereco:", endereco_publico())
+        print("Saldo   :", obter_saldo_sol(), "SOL")
+    except WalletNaoConfiguradaError as e:
+        print("Wallet nao configurada:", e)
+
+
