@@ -277,7 +277,16 @@ def main() -> None:
         time.sleep(config.POLL_INTERVAL_SEGUNDOS)
 
 
+def _sair_limpo(signum, frame):
+    """Transforma o SIGTERM (enviado pelo botao 'Parar Bot' do dashboard)
+    num KeyboardInterrupt - exatamente o mesmo caminho de saida limpa
+    do Ctrl+C no terminal."""
+    raise KeyboardInterrupt
+
+
 if __name__ == "__main__":
+    import signal
+    signal.signal(signal.SIGTERM, _sair_limpo)
     try:
         main()
     except KeyboardInterrupt:

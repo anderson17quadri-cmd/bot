@@ -20,5 +20,7 @@ seen.json
 *.log
 carteira.json
 posicoes.json
+radar.json
+bot.pid
 wallet.py.*
 gerar_wallet.py

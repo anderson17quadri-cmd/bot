@@ -4,130 +4,262 @@
   <meta charset="UTF-8">
   <!-- viewport: essencial para a pagina se adaptar ao ecra do telemovel -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sniper Bot - Dashboard</title>
+  <title>Sniper Bot Solana — Dashboard</title>
+
+  <!-- Favicon: um SVG embutido (mira violeta), sem ficheiro externo -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b7cf6' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Ccircle cx='12' cy='12' r='2.5' fill='%238b7cf6'/%3E%3Cpath d='M12 1v4M12 19v4M1 12h4M19 12h4'/%3E%3C/svg%3E">
 
   <!-- Chart.js (biblioteca de graficos) servido localmente a partir de
-       static/ - assim o dashboard funciona mesmo sem internet.
-       (E a versao 4.4.3, descarregada do CDN jsdelivr uma unica vez.) -->
+       static/ - assim o dashboard funciona mesmo sem internet. -->
   <script src="{{ url_for('static', filename='chart.umd.min.js') }}"></script>
 
   <!-- O nosso CSS (Flask serve tudo o que esta em static/ automaticamente) -->
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<!-- A classe 'carregando' mostra os "esqueletos" a pulsar; o app.js
+     tira-a assim que os primeiros dados chegarem -->
+<body class="carregando">
 
-  <!-- ================= CABECALHO ================= -->
-  <header>
-    <h1>Sniper Bot <span class="subtitulo">Solana</span></h1>
-    <!-- Badge do modo: o app.js poe aqui DRY RUN ou REAL e a cor certa -->
-    <div id="badge-modo" class="badge">a carregar...</div>
+  <!-- ============================================================
+       SVGs partilhados: cada icone e definido UMA vez aqui dentro
+       e reutilizado com <use href="#id"> - assim o HTML nao repete
+       o desenho em cada sitio onde o icone aparece
+       ============================================================ -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <!-- mira / alvo (logo e posicoes) -->
+      <g id="i-alvo"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.5"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></g>
+      <!-- linha de grafico a subir -->
+      <g id="i-grafico"><path d="M3 20h18"/><path d="M4 15l5-5 4 3 6-8"/></g>
+      <!-- velas de trading -->
+      <g id="i-velas"><path d="M7 4v3M7 15v4"/><rect x="4.5" y="7" width="5" height="8" rx="1"/><path d="M17 3v4M17 16v5"/><rect x="14.5" y="7" width="5" height="9" rx="1"/></g>
+      <!-- radar -->
+      <g id="i-radar"><path d="M12 12L19 5"/><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7a5 5 0 1 0 5 5"/><circle cx="12" cy="12" r="1"/></g>
+      <!-- lista / historico -->
+      <g id="i-lista"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></g>
+      <!-- terminal / log -->
+      <g id="i-terminal"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 9l4 3-4 3M12 15h6"/></g>
+      <!-- caixa vazia (estados sem dados) -->
+      <g id="i-vazio"><path d="M3 9l9-6 9 6v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M3 9l9 6 9-6"/></g>
+      <!-- aviso / triangulo -->
+      <g id="i-aviso"><path d="M12 3L2 20h20z"/><path d="M12 10v4M12 17.5h.01"/></g>
+    </defs>
+  </svg>
+
+  <!-- ================= CABECALHO FIXO (sticky) ================= -->
+  <header class="topo">
+    <div class="topo-linha">
+      <h1>
+        <svg class="icone logo" viewBox="0 0 24 24"><use href="#i-alvo"/></svg>
+        Sniper Bot <span class="subtitulo">SOLANA</span>
+      </h1>
+
+      <!-- Toggle SIMULADO/REAL: controlo segmentado que mostra o modo
+           ATUAL do .env e permite mudar (com dupla confirmacao p/ REAL) -->
+      <div class="seletor-modo" id="seletor-modo" role="group" aria-label="Modo do bot">
+        <button id="btn-modo-simulado" class="segmento">SIMULADO</button>
+        <button id="btn-modo-real" class="segmento">REAL</button>
+      </div>
+    </div>
+
+    <div class="topo-linha">
+      <!-- Indicador de estado do bot: bolinha pulsante + texto -->
+      <div class="estado-bot" id="estado-bot">
+        <span class="bolinha" id="bolinha-bot"></span>
+        <span id="texto-estado-bot">Bot: …</span>
+      </div>
+
+      <!-- Botao que alterna Iniciar (verde) / Parar (vermelho) -->
+      <button id="btn-bot" class="btn" disabled>…</button>
+    </div>
   </header>
 
-  <!-- Ultima atualizacao (o polling escreve aqui a hora de cada refresh) -->
-  <p id="ultima-atualizacao" class="atualizacao">a ligar ao bot...</p>
+  <!-- Aviso de desfasamento: bot a correr num modo != do .env -->
+  <div class="aviso-barra" id="aviso-desfasado" hidden>
+    <svg class="icone" viewBox="0 0 24 24"><use href="#i-aviso"/></svg>
+    <span id="texto-desfasado">O bot está a correr num modo diferente do .env.</span>
+    <button id="btn-reiniciar" class="btn btn-pequeno">Reiniciar bot</button>
+  </div>
 
-  <!-- ================= 1. CARTOES DE RESUMO ================= -->
-  <section class="cartoes">
-    <div class="cartao"><span class="rotulo">Saldo inicial</span><span class="valor" id="c-saldo-inicial">–</span></div>
-    <div class="cartao"><span class="rotulo">Saldo livre</span><span class="valor" id="c-saldo-livre">–</span></div>
-    <div class="cartao"><span class="rotulo">Em posições</span><span class="valor" id="c-valor-posicoes">–</span></div>
-    <div class="cartao"><span class="rotulo">Valor total</span><span class="valor" id="c-valor-total">–</span></div>
-    <!-- Este cartao ocupa a largura toda: e o numero mais importante -->
-    <div class="cartao destaque">
-      <span class="rotulo">Lucro / Prejuízo total</span>
-      <span class="valor grande" id="c-lucro-total">–</span>
-    </div>
-    <div class="cartao"><span class="rotulo">Compras</span><span class="valor" id="c-n-compras">–</span></div>
-    <div class="cartao"><span class="rotulo">Vendas</span><span class="valor" id="c-n-vendas">–</span></div>
-    <div class="cartao"><span class="rotulo">Win rate</span><span class="valor" id="c-win-rate">–</span></div>
-  </section>
+  <!-- Zona de mensagens rapidas (erros/sucessos das acoes) -->
+  <div class="toast" id="toast" hidden></div>
 
-  <!-- ================= 2. CURVA DE SALDO ================= -->
-  <section class="painel">
-    <h2>📈 Evolução do saldo</h2>
-    <div class="area-grafico">
-      <canvas id="grafico-saldo"></canvas>
-    </div>
-    <p class="vazio" id="vazio-saldo" hidden>Sem trades ainda — o gráfico aparece quando o bot fizer a primeira operação.</p>
-  </section>
+  <main>
+    <!-- Ultima atualizacao (o polling escreve aqui a hora de cada refresh) -->
+    <p id="ultima-atualizacao" class="atualizacao">a ligar ao bot…</p>
 
-  <!-- ================= 3. GANHOS VS PERDAS (velas de P/L) ================= -->
-  <section class="painel">
-    <h2>🕯️ Ganhos vs Perdas por trade</h2>
-    <!-- Totais por cima do grafico, com as mesmas cores das velas -->
-    <p class="totais-gp">
-      <span class="ganho">▲ Ganho: <b id="gp-ganho">–</b></span>
-      <span class="perda">▼ Perdido: <b id="gp-perdido">–</b></span>
-    </p>
-    <div class="area-grafico">
-      <canvas id="grafico-velas"></canvas>
-    </div>
-    <p class="vazio" id="vazio-velas" hidden>Ainda sem vendas fechadas — aparecem aqui quando o stop-loss ou take-profit disparar. Cada venda vira uma vela: verde se deu lucro, vermelha se deu prejuízo.</p>
-  </section>
+    <!-- ================= 1. CARTOES DE RESUMO ================= -->
+    <section class="cartoes">
+      <div class="cartao"><span class="rotulo">Saldo inicial</span><span class="valor num" id="c-saldo-inicial">–</span></div>
+      <div class="cartao"><span class="rotulo">Saldo livre</span><span class="valor num" id="c-saldo-livre">–</span></div>
+      <div class="cartao"><span class="rotulo">Em posições</span><span class="valor num" id="c-valor-posicoes">–</span></div>
+      <div class="cartao"><span class="rotulo">Valor total</span><span class="valor num" id="c-valor-total">–</span></div>
+      <!-- Este cartao ocupa a largura toda: e o numero mais importante -->
+      <div class="cartao destaque">
+        <span class="rotulo">Lucro / Prejuízo total</span>
+        <span class="valor num grande" id="c-lucro-total">–</span>
+      </div>
+      <div class="cartao"><span class="rotulo">Compras</span><span class="valor num" id="c-n-compras">–</span></div>
+      <div class="cartao"><span class="rotulo">Vendas</span><span class="valor num" id="c-n-vendas">–</span></div>
+      <div class="cartao"><span class="rotulo">Win rate</span><span class="valor num" id="c-win-rate">–</span></div>
+    </section>
 
-  <!-- ================= 4. POSICOES ABERTAS ================= -->
-  <section class="painel">
-    <h2>🎯 Posições abertas <span class="ao-vivo">● ao vivo</span></h2>
-    <div class="tabela-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th>Símbolo</th>
-            <th>Investido</th>
-            <th>Preço compra</th>
-            <th>Quantidade</th>
-            <th>Aberta há</th>
-            <th>Valor atual</th>
-            <th>P/L</th>
-          </tr>
-        </thead>
-        <tbody id="tabela-posicoes"></tbody>
-      </table>
-    </div>
-    <p class="vazio" id="vazio-posicoes" hidden>Nenhuma posição aberta neste momento.</p>
-  </section>
+    <!-- ================= 2. LOG AO VIVO DO BOT ================= -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-terminal"/></svg> Log ao vivo</h2>
+      <pre id="log-bot" class="log-caixa">O log aparece aqui quando o bot arrancar…</pre>
+    </section>
 
-  <!-- ================= 5. RADAR PUMP.FUN (detecao ao vivo) ================= -->
-  <!-- Diferente das posicoes abertas: aqui aparecem TODOS os tokens que
-       o bot detetou e analisou, mesmo os que decidiu NAO comprar -->
-  <section class="painel">
-    <h2>📡 Radar de tokens <span class="ao-vivo">● ao vivo</span></h2>
-    <div class="tabela-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th>Símbolo</th>
-            <th>Score</th>
-            <th>Liquidez</th>
-            <th>DEX</th>
-            <th>Detetado há</th>
-          </tr>
-        </thead>
-        <tbody id="tabela-radar"></tbody>
-      </table>
-    </div>
-    <p class="vazio" id="vazio-radar" hidden>O radar está vazio — os tokens aparecem aqui à medida que o bot os deteta e analisa.</p>
-  </section>
+    <!-- ================= 3. CURVA DE SALDO ================= -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-grafico"/></svg> Evolução do saldo</h2>
+      <div class="area-grafico">
+        <canvas id="grafico-saldo"></canvas>
+      </div>
+      <div class="vazio" id="vazio-saldo" hidden>
+        <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-vazio"/></svg>
+        <p>Sem trades ainda — o gráfico aparece quando o bot fizer a primeira operação.</p>
+      </div>
+    </section>
 
-  <!-- ================= 6. HISTORICO DE TRADES ================= -->
-  <section class="painel">
-    <h2>📋 Histórico de trades</h2>
-    <div class="tabela-scroll">
-      <table>
-        <thead>
-          <tr>
-            <th>Data / hora</th>
-            <th>Tipo</th>
-            <th>Símbolo</th>
-            <th>Valor</th>
-            <th>Lucro</th>
-          </tr>
-        </thead>
-        <tbody id="tabela-historico"></tbody>
-      </table>
+    <!-- ================= 4. GANHOS VS PERDAS (velas de P/L) ================= -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-velas"/></svg> Ganhos vs Perdas por trade</h2>
+      <!-- Totais por cima do grafico, com as mesmas cores das velas -->
+      <p class="totais-gp">
+        <span class="ganho">▲ Ganho: <b class="num" id="gp-ganho">–</b></span>
+        <span class="perda">▼ Perdido: <b class="num" id="gp-perdido">–</b></span>
+      </p>
+      <div class="area-grafico">
+        <canvas id="grafico-velas"></canvas>
+      </div>
+      <div class="vazio" id="vazio-velas" hidden>
+        <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-velas"/></svg>
+        <p>Ainda sem vendas fechadas — aparecem aqui quando o stop-loss ou take-profit disparar.<br>Cada venda vira uma vela: verde se deu lucro, vermelha se deu prejuízo.</p>
+      </div>
+    </section>
+
+    <!-- ================= 5. POSICOES ABERTAS ================= -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-alvo"/></svg> Posições abertas <span class="ao-vivo">● ao vivo</span></h2>
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Símbolo</th>
+              <th>Investido</th>
+              <th>Preço compra</th>
+              <th>Quantidade</th>
+              <th>Aberta há</th>
+              <th>Valor atual</th>
+              <th>P/L</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-posicoes"></tbody>
+        </table>
+      </div>
+      <div class="vazio" id="vazio-posicoes" hidden>
+        <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-alvo"/></svg>
+        <p>Nenhuma posição aberta neste momento.</p>
+      </div>
+    </section>
+
+    <!-- ================= 6. RADAR PUMP.FUN (detecao ao vivo) ================= -->
+    <!-- Diferente das posicoes abertas: aqui aparecem TODOS os tokens que
+         o bot detetou e analisou, mesmo os que decidiu NAO comprar -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-radar"/></svg> Radar de tokens <span class="ao-vivo">● ao vivo</span></h2>
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Símbolo</th>
+              <th>Score</th>
+              <th>Liquidez</th>
+              <th>DEX</th>
+              <th>Detetado há</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-radar"></tbody>
+        </table>
+      </div>
+      <div class="vazio" id="vazio-radar" hidden>
+        <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-radar"/></svg>
+        <p>O radar está vazio — os tokens aparecem aqui à medida que o bot os deteta e analisa.</p>
+      </div>
+    </section>
+
+    <!-- ================= 7. HISTORICO DE TRADES ================= -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-lista"/></svg> Histórico de trades</h2>
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Data / hora</th>
+              <th>Tipo</th>
+              <th>Símbolo</th>
+              <th>Valor</th>
+              <th>Lucro</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-historico"></tbody>
+        </table>
+      </div>
+      <div class="vazio" id="vazio-historico" hidden>
+        <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-lista"/></svg>
+        <p>Sem trades no histórico — quando o bot comprar ou vender, aparece aqui.</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================================================
+       MODAIS (dialogos por cima da pagina)
+       Todos partilham o mesmo fundo escurecido (.modal-fundo).
+       O app.js mostra/esconde consoante a acao.
+       ============================================================ -->
+  <div class="modal-fundo" id="modal-fundo" hidden>
+
+    <!-- Modal A: 1.a confirmacao da mudanca para REAL (aviso forte) -->
+    <div class="modal" id="modal-real-aviso" hidden>
+      <h3 class="perigo">⚠ Mudar para modo REAL</h3>
+      <p class="texto-perigo">
+        Vais mudar para modo <b>REAL</b>. O bot vai usar
+        <b>dinheiro verdadeiro da tua wallet</b>. Tens a certeza?
+      </p>
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="btn-real-continuar">Continuar</button>
+      </div>
     </div>
-    <p class="vazio" id="vazio-historico" hidden>Sem trades no histórico — quando o bot comprar ou vender, aparece aqui.</p>
-  </section>
+
+    <!-- Modal B: 2.a confirmacao - tem de escrever CONFIRMO -->
+    <div class="modal" id="modal-real-confirmo" hidden>
+      <h3 class="perigo">Última confirmação</h3>
+      <p>Para ativar o modo REAL, escreve <b class="num">CONFIRMO</b> na caixa:</p>
+      <input type="text" id="input-confirmo" class="campo-texto num"
+             autocomplete="off" autocapitalize="characters" placeholder="CONFIRMO">
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <!-- So fica ativo quando o texto for exatamente CONFIRMO -->
+        <button class="btn btn-perigo" id="btn-real-confirmar" disabled>Ativar modo REAL</button>
+      </div>
+    </div>
+
+    <!-- Modal C: confirmacao extra para INICIAR o bot em modo REAL -->
+    <div class="modal" id="modal-iniciar-real" hidden>
+      <h3 class="perigo">⚠ Iniciar em modo REAL</h3>
+      <p class="texto-perigo">
+        O .env está em modo <b>REAL</b> — o bot vai negociar com
+        <b>dinheiro verdadeiro</b> assim que arrancar. Iniciar mesmo?
+      </p>
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="btn-iniciar-real-sim">Sim, iniciar</button>
+      </div>
+    </div>
+
+  </div>
 
   <!-- O JavaScript vai no fim do body: assim o HTML acima ja existe
        quando o script corre e procura os elementos por id -->

@@ -19,10 +19,14 @@ e depois abrir http://localhost:5000 no browser.
 
 import json
 import os
+import signal
+import subprocess
+import sys
 import time
+from datetime import datetime, timezone
 
 import requests
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 
 import config  # so para ler DRY_RUN, SALDO_VIRTUAL_INICIAL, etc.
 
@@ -110,6 +114,123 @@ def _valor_atual_usd(mint: str, quantidade_tokens: float):
 
 
 # ==========================================================================
+# Gestao do processo do bot (main.py como subprocesso)
+# ==========================================================================
+# O dashboard consegue arrancar e parar o main.py sem precisares do
+# terminal. O estado sobrevive a reinicios do dashboard gracas ao
+# ficheiro bot.pid: {"pid": ..., "dry_run": ..., "iniciado_em": ...}
+
+FICHEIRO_PID = "bot.pid"
+FICHEIRO_LOG = "bot.log"
+
+# Referencia ao Popen quando fomos NOS a arrancar o bot nesta sessao
+# do dashboard (se o dashboard reiniciar, recuperamos pelo bot.pid)
+_processo_bot = None
+
+
+def _ler_pid_info():
+    """Le o bot.pid. Devolve o dict ou None se nao existir/estiver mau."""
+    if not os.path.exists(FICHEIRO_PID):
+        return None
+    try:
+        with open(FICHEIRO_PID, "r", encoding="utf-8") as f:
+            info = json.load(f)
+            return info if isinstance(info, dict) and "pid" in info else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _guardar_pid_info(info: dict) -> None:
+    """Escrita atomica do bot.pid (tmp + rename, como posicoes.py)."""
+    tmp = FICHEIRO_PID + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(info, f, indent=2)
+    os.replace(tmp, FICHEIRO_PID)
+
+
+def _apagar_pid_info() -> None:
+    try:
+        os.remove(FICHEIRO_PID)
+    except OSError:
+        pass
+
+
+def _pid_vivo(pid: int) -> bool:
+    """os.kill(pid, 0) nao mata nada: sinal 0 so testa se o processo
+    existe. Se nao existir, o sistema levanta ProcessLookupError."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError, TypeError):
+        return False
+
+
+def _estado_bot():
+    """Devolve (a_correr, info_do_pid). Fonte da verdade: o bot.pid +
+    verificacao de que o PID ainda esta vivo no sistema."""
+    global _processo_bot
+    info = _ler_pid_info()
+    if info is None:
+        return False, None
+    if _pid_vivo(info["pid"]):
+        return True, info
+    # O processo morreu sozinho (crash? Ctrl+C noutro terminal?)
+    # -> limpa o pid file para nao ficar estado fantasma
+    _apagar_pid_info()
+    _processo_bot = None
+    return False, None
+
+
+def _ler_dry_run_do_env() -> bool:
+    """Le o valor ATUAL de DRY_RUN diretamente do ficheiro .env.
+
+    Nao usamos config.DRY_RUN aqui porque esse foi lido quando o
+    dashboard arrancou - se o .env mudar entretanto (via /api/modo),
+    o config ficaria desatualizado. Sem .env ou sem a linha -> True
+    (o mesmo defeito seguro do config.py)."""
+    if not os.path.exists(".env"):
+        return True
+    try:
+        with open(".env", "r", encoding="utf-8") as f:
+            for linha in f:
+                linha = linha.strip()
+                if linha.startswith("DRY_RUN="):
+                    valor = linha.split("=", 1)[1].strip().strip('"').strip("'")
+                    return valor.lower() in ("1", "true", "yes", "sim")
+    except OSError:
+        pass
+    return True
+
+
+def _escrever_dry_run_no_env(dry_run: bool) -> None:
+    """Atualiza SO a linha DRY_RUN=... do .env, preservando tudo o
+    resto (comentarios, outras variaveis). Escrita atomica."""
+    valor = "true" if dry_run else "false"
+    linhas = []
+    substituida = False
+
+    if os.path.exists(".env"):
+        with open(".env", "r", encoding="utf-8") as f:
+            for linha in f:
+                if linha.strip().startswith("DRY_RUN="):
+                    linhas.append(f"DRY_RUN={valor}\n")
+                    substituida = True
+                else:
+                    linhas.append(linha)
+
+    if not substituida:
+        # .env sem a linha (ou inexistente) -> acrescenta no fim
+        if linhas and not linhas[-1].endswith("\n"):
+            linhas[-1] += "\n"
+        linhas.append(f"DRY_RUN={valor}\n")
+
+    tmp = ".env.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.writelines(linhas)
+    os.replace(tmp, ".env")
+
+
+# ==========================================================================
 # Rotas
 # ==========================================================================
 @app.route("/")
@@ -178,7 +299,8 @@ def api_resumo():
     )
 
     return jsonify({
-        "dry_run": config.DRY_RUN,
+        # Relido do .env a cada pedido (pode mudar via /api/modo)
+        "dry_run": _ler_dry_run_do_env(),
         "cartoes": {
             "saldo_inicial": round(inicial, 2),
             "saldo_livre": round(saldo_livre, 2),
@@ -240,6 +362,164 @@ def api_radar():
     """Devolve os ultimos tokens que o bot detetou e analisou (o radar.py
     ja guarda com o mais recente primeiro e limitado a 50 registos)."""
     return jsonify({"radar": _ler_radar()})
+
+
+# --------------------------------------------------------------------------
+# Rotas de controlo do bot (Parte 1)
+# --------------------------------------------------------------------------
+@app.route("/api/bot/status")
+def api_bot_status():
+    """Estado do bot + modo do .env. O frontend usa isto para o
+    indicador A CORRER/PARADO, o toggle SIMULADO/REAL e o aviso de
+    desfasamento (bot a correr num modo != do que esta no .env)."""
+    a_correr, info = _estado_bot()
+    dry_run_env = _ler_dry_run_do_env()
+
+    return jsonify({
+        "a_correr": a_correr,
+        "pid": info["pid"] if a_correr else None,
+        "iniciado_em": info.get("iniciado_em") if a_correr else None,
+        # Modo com que o bot FOI ARRANCADO (gravado no bot.pid)
+        "dry_run_bot": info.get("dry_run") if a_correr else None,
+        # Modo que esta AGORA no .env (o que o bot usara no proximo arranque)
+        "dry_run_env": dry_run_env,
+        # Ha desfasamento? So interessa se o bot estiver a correr
+        "desfasado": a_correr and info.get("dry_run") is not None
+                      and info.get("dry_run") != dry_run_env,
+        # Pre-requisitos (o frontend desativa botoes conforme isto)
+        "camada1_ok": config.camada1_configurada(),
+        "fase2_ok": config.fase2_configurada(),
+    })
+
+
+@app.route("/api/bot/iniciar", methods=["POST"])
+def api_bot_iniciar():
+    """Arranca o main.py em segundo plano, com o output para bot.log."""
+    global _processo_bot
+
+    # 1) Nunca deixar dois bots a correr ao mesmo tempo
+    a_correr, _ = _estado_bot()
+    if a_correr:
+        return jsonify({"ok": False, "erro": "O bot já está a correr."}), 409
+
+    # 2) Sem Camada 1 configurada o bot nao analisa nada - nao vale a
+    #    pena arrancar (mesma verificacao que farias no terminal)
+    if not config.camada1_configurada():
+        return jsonify({
+            "ok": False,
+            "erro": "Camada 1 (DeepSeek) não configurada — define DEEPSEEK_API_KEY no .env primeiro.",
+        }), 400
+
+    dry_run_atual = _ler_dry_run_do_env()
+
+    # 3) Arranca o main.py:
+    #    - sys.executable = o mesmo python3 que corre o dashboard
+    #    - stdout+stderr para bot.log (a caixa "Log ao vivo" le daqui)
+    #    - start_new_session=True: o bot fica no seu proprio grupo de
+    #      processos, por isso sobrevive se o dashboard for reiniciado
+    log = open(FICHEIRO_LOG, "a", encoding="utf-8")
+    log.write(f"\n===== Bot iniciado pelo dashboard em {datetime.now(timezone.utc).isoformat()} =====\n")
+    log.flush()
+    _processo_bot = subprocess.Popen(
+        [sys.executable, "-u", "main.py"],  # -u = output sem buffer (log em tempo real)
+        stdout=log, stderr=subprocess.STDOUT,
+    )
+    log.close()  # o filho herdou o descritor; podemos fechar o nosso
+
+    # 4) Guarda o PID (+ o modo com que arrancou) para recuperar estado
+    _guardar_pid_info({
+        "pid": _processo_bot.pid,
+        "dry_run": dry_run_atual,
+        "iniciado_em": datetime.now(timezone.utc).isoformat(),
+    })
+
+    return jsonify({"ok": True, "pid": _processo_bot.pid, "dry_run": dry_run_atual})
+
+
+@app.route("/api/bot/parar", methods=["POST"])
+def api_bot_parar():
+    """Para o bot com SIGTERM (saida limpa); SIGKILL so como ultimo
+    recurso se ele nao responder em 10 segundos."""
+    global _processo_bot
+
+    a_correr, info = _estado_bot()
+    if not a_correr:
+        return jsonify({"ok": False, "erro": "O bot não está a correr."}), 409
+
+    pid = info["pid"]
+    try:
+        os.kill(pid, signal.SIGTERM)  # o main.py apanha isto e sai limpo
+    except ProcessLookupError:
+        pass  # ja morreu entre o _estado_bot() e agora - tudo bem
+
+    # Espera ate 10s pela saida limpa (verifica 20x a cada 0.5s)
+    for _ in range(20):
+        if not _pid_vivo(pid):
+            break
+        time.sleep(0.5)
+    else:
+        # Nao saiu a bem -> forca (SIGKILL nao pode ser ignorado)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    _apagar_pid_info()
+    _processo_bot = None
+    return jsonify({"ok": True})
+
+
+@app.route("/api/bot/log")
+def api_bot_log():
+    """Ultimas 30 linhas do bot.log, para a caixa 'Log ao vivo'."""
+    if not os.path.exists(FICHEIRO_LOG):
+        return jsonify({"linhas": []})
+    try:
+        with open(FICHEIRO_LOG, "r", encoding="utf-8", errors="replace") as f:
+            linhas = f.readlines()
+        return jsonify({"linhas": [l.rstrip("\n") for l in linhas[-30:]]})
+    except OSError:
+        return jsonify({"linhas": []})
+
+
+# --------------------------------------------------------------------------
+# Rota de mudanca de modo SIMULADO <-> REAL (Parte 3)
+# --------------------------------------------------------------------------
+@app.route("/api/modo", methods=["POST"])
+def api_modo():
+    """Muda DRY_RUN no .env. A validacao critica vive AQUI no backend:
+    mesmo que alguem contorne os dialogos do browser, mudar para REAL
+    exige wallet configurada + a palavra CONFIRMO no proprio pedido."""
+    corpo = request.get_json(silent=True) or {}
+    if "dry_run" not in corpo:
+        return jsonify({"ok": False, "erro": "Pedido inválido: falta o campo dry_run."}), 400
+
+    novo_dry_run = bool(corpo["dry_run"])
+
+    # ---- Mudar para REAL: as duas barreiras de seguranca ----
+    if not novo_dry_run:
+        # Barreira 1: sem wallet nao ha modo real
+        if not config.fase2_configurada():
+            return jsonify({
+                "ok": False,
+                "erro": "WALLET_PRIVATE_KEY não está configurada no .env — sem wallet não é possível ativar o modo REAL.",
+            }), 400
+        # Barreira 2: a palavra de confirmacao tem de vir no pedido
+        if corpo.get("confirmacao") != "CONFIRMO":
+            return jsonify({
+                "ok": False,
+                "erro": "Confirmação em falta: para mudar para modo REAL é preciso escrever CONFIRMO.",
+            }), 400
+
+    _escrever_dry_run_no_env(novo_dry_run)
+
+    # Se o bot estiver a correr, a mudanca so se aplica no reinicio
+    a_correr, _ = _estado_bot()
+    return jsonify({
+        "ok": True,
+        "dry_run": novo_dry_run,
+        "precisa_reiniciar": a_correr,
+    })
 
 
 if __name__ == "__main__":
