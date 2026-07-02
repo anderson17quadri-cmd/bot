@@ -18,3 +18,7 @@ seen.json
 
 # Logs
 *.log
+carteira.json
+posicoes.json
+wallet.py.*
+gerar_wallet.py
