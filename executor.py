@@ -1,24 +1,39 @@
 """
 executor.py  -  Execucao de compras/vendas via Jupiter
 =========================================================
-Modo DRY_RUN: so pede cotacao real, nunca assina nem envia nada.
-Modo real: assina com solders e envia via RPC.
+Usa a Jupiter API (agregador de swaps em Solana) para trocar SOL <-> token.
+
+Em modo DRY_RUN (config.DRY_RUN = True, o valor por defeito), as funcoes
+so pedem uma COTACAO real a Jupiter (para os numeros serem realistas) mas
+NUNCA assinam nem enviam nenhuma transacao. E 100% seguro correr assim.
+
+Em modo real (DRY_RUN = False), assina a transacao devolvida pela Jupiter
+com a wallet do bot (solders) e envia-a para a rede via RPC.
+
+Fluxo Jupiter (2 passos):
+    1. GET  /quote  -> devolve a melhor rota e os montantes estimados
+    2. POST /swap   -> devolve uma transacao (base64) pronta a assinar
 """
 
 import base64
+import time
 
 import requests
 from solders.transaction import VersionedTransaction
+from solders.commitment_config import CommitmentLevel
 
 import config
 import wallet
 import posicoes
+import carteira
 
-JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
-JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/swap"
+JUPITER_QUOTE_URL = "https://public.jupiterapi.com/quote"
+JUPITER_SWAP_URL = "https://public.jupiterapi.com/swap"
 
 
 def _obter_cotacao(mint_entrada: str, mint_saida: str, quantidade_lamports: int) -> dict:
+    """Pede uma cotacao a Jupiter. Funciona igual em dry-run ou real -
+    e so uma consulta, nao mexe em dinheiro nenhum."""
     params = {
         "inputMint": mint_entrada,
         "outputMint": mint_saida,
@@ -31,6 +46,11 @@ def _obter_cotacao(mint_entrada: str, mint_saida: str, quantidade_lamports: int)
 
 
 def _executar_swap_real(cotacao: dict) -> str:
+    """Pede a transacao a Jupiter, assina-a com a wallet do bot, envia-a
+    para a rede, e devolve a assinatura (hash) da transacao.
+
+    So deve ser chamada quando config.DRY_RUN == False.
+    """
     keypair = wallet.obter_keypair()
 
     payload = {
@@ -67,10 +87,17 @@ def _executar_swap_real(cotacao: dict) -> str:
     if "error" in resultado:
         raise RuntimeError(f"RPC recusou a transacao: {resultado['error']}")
 
-    return resultado["result"]
+    return resultado["result"]  # assinatura da transacao
 
 
 def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float) -> dict:
+    """Compra 'valor_usd' dolares do token 'mint', pagando em SOL.
+
+    'preco_sol_usd' e o preco atual do SOL em USD, usado so para converter
+    o valor_usd em lamports de SOL a pedir na cotacao.
+
+    Devolve um dict com o resultado (sucesso, dry_run, detalhes).
+    """
     if valor_usd > config.MAX_TRADE_USD:
         raise ValueError(
             f"Tentativa de compra (${valor_usd}) excede o limite "
@@ -85,6 +112,11 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
     preco_compra_estimado = valor_usd / quantidade_tokens_estimada if quantidade_tokens_estimada else 0
 
     if config.DRY_RUN:
+        if not carteira.registar_compra(simbolo, valor_usd):
+            return {
+                "sucesso": False, "dry_run": True,
+                "mensagem": f"[SIMULADO] Saldo virtual insuficiente para comprar {simbolo}",
+            }
         posicoes.abrir_posicao(
             mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
             preco_compra_usd=preco_compra_estimado,
@@ -96,6 +128,7 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
             "quantidade_tokens": quantidade_tokens_estimada,
         }
 
+    # Modo real - assina e envia de verdade
     assinatura = _executar_swap_real(cotacao)
     posicoes.abrir_posicao(
         mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
@@ -110,6 +143,9 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
 
 
 def vender_token(mint: str, percentagem: float) -> dict:
+    """Vende 'percentagem' (0-100) da posicao aberta no token 'mint',
+    trocando de volta para SOL.
+    """
     todas = posicoes.listar_posicoes_abertas()
     posicao = todas.get(mint)
     if not posicao:
@@ -120,9 +156,23 @@ def vender_token(mint: str, percentagem: float) -> dict:
     cotacao = _obter_cotacao(mint, config.MINT_SOL, int(quantidade_a_vender))
 
     if config.DRY_RUN:
+        # Estima o valor recebido em USD via cotacao token -> USDC (mais
+        # direto do que converter atraves de SOL)
+        cotacao_usdc = _obter_cotacao(mint, config.MINT_USDC, int(quantidade_a_vender))
+        valor_recebido_usd = float(cotacao_usdc["outAmount"]) / 1_000_000
+        valor_investido_proporcional = (
+            posicao["valor_investido_usd"] * (percentagem / 100.0)
+        )
+        carteira.registar_venda(
+            posicao["simbolo"], valor_recebido_usd, valor_investido_proporcional
+        )
         resultado = {
             "sucesso": True, "dry_run": True,
-            "mensagem": f"[SIMULADO] Vendido {percentagem}% de {posicao['simbolo']}",
+            "mensagem": (
+                f"[SIMULADO] Vendido {percentagem}% de {posicao['simbolo']} "
+                f"por ${valor_recebido_usd:.2f} "
+                f"(investido: ${valor_investido_proporcional:.2f})"
+            ),
         }
     else:
         assinatura = _executar_swap_real(cotacao)
@@ -131,6 +181,7 @@ def vender_token(mint: str, percentagem: float) -> dict:
             "mensagem": f"Vendido {percentagem}% de {posicao['simbolo']} - tx {assinatura[:12]}...",
         }
 
+    # Atualiza/fecha a posicao consoante a percentagem vendida
     if percentagem >= 100:
         posicoes.fechar_posicao(mint)
     else:
@@ -140,8 +191,14 @@ def vender_token(mint: str, percentagem: float) -> dict:
     return resultado
 
 
+# --------------------------------------------------------------------------
+# Teste rapido:  python executor.py
+# Faz so uma cotacao (nunca compra nada), para confirmar que a ligacao a
+# Jupiter esta a funcionar.
+# --------------------------------------------------------------------------
 if __name__ == "__main__":
     print(f"DRY_RUN ativo: {config.DRY_RUN}")
     print("A pedir uma cotacao de teste (SOL -> USDC)...")
-    cot = _obter_cotacao(config.MINT_SOL, config.MINT_USDC, 10_000_000)
-    print("outAmount:", cot.get("outAmount"))
+    cot = _obter_cotacao(config.MINT_SOL, config.MINT_USDC, 10_000_000)  # 0.01 SOL
+    print("outAmount:", cot.get("outAmount"), "(em unidades minimas de USDC)")
+

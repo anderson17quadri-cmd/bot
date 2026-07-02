@@ -1,48 +1,3 @@
-# ==========================================================================
-# 7) FASE 2 - Execucao de trades
-# ==========================================================================
-# Modo de seguranca: em DRY_RUN, o bot simula compras/vendas e regista tudo,
-# mas NUNCA assina nem envia transacoes reais. O valor por defeito e SEMPRE
-# True - so passa a False se o utilizador mudar isto explicitamente no .env.
-DRY_RUN = _env_texto("DRY_RUN", "true").lower() in ("1", "true", "yes", "sim")
-
-# Chave privada da wallet dedicada ao bot, em formato base58 (o formato que
-# o Phantom/Solflare mostram ao exportar). NUNCA a wallet principal.
-WALLET_PRIVATE_KEY = _env_texto("WALLET_PRIVATE_KEY")
-
-# Limite maximo (USD) que o bot pode gastar numa unica compra.
-MAX_TRADE_USD = _env_float("MAX_TRADE_USD", 5.0)
-
-# So compra automaticamente se o score de risco final for <= a este valor.
-SCORE_COMPRA_MAX = _env_int("SCORE_COMPRA_MAX", 20)
-
-# Stop-loss: vender tudo se a posicao cair esta percentagem desde a compra.
-STOP_LOSS_PCT = _env_float("STOP_LOSS_PCT", 20.0)
-
-# Take-profit: vender esta percentagem da posicao quando o preco multiplicar
-# por TAKE_PROFIT_MULTIPLICADOR (2.0 = dobrou / +100%).
-TAKE_PROFIT_MULTIPLICADOR = _env_float("TAKE_PROFIT_MULTIPLICADOR", 2.0)
-TAKE_PROFIT_VENDER_PCT = _env_float("TAKE_PROFIT_VENDER_PCT", 50.0)
-
-# Trailing stop (%) aplicado ao que sobra da posicao depois do take-profit,
-# medido a partir do pico de preco atingido.
-TRAILING_STOP_PCT = _env_float("TRAILING_STOP_PCT", 15.0)
-
-# Slippage maximo tolerado nos swaps (em basis points; 100 = 1%).
-SLIPPAGE_BPS = _env_int("SLIPPAGE_BPS", 500)
-
-# Ficheiro local (JSON) onde ficam guardadas as posicoes abertas.
-FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
-
-# Intervalo (segundos) entre cada verificacao das posicoes abertas
-# (stop-loss / take-profit), independente de aparecerem tokens novos.
-INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)
-
-
-def fase2_configurada() -> bool:
-    """True se houver uma chave de wallet definida (mesmo em dry-run, e
-    preciso para simular saldos/enderecos de forma realista)."""
-    return bool(WALLET_PRIVATE_KEY)
 """
 config.py
 =========
@@ -59,34 +14,22 @@ nunca aqui no codigo.
 import os
 from dotenv import load_dotenv
 
-# Le o ficheiro .env (se existir) e coloca as variaveis no os.environ.
-# Se o .env nao existir, nao ha problema: usamos os valores por defeito.
 load_dotenv()
 
 
-# --------------------------------------------------------------------------
-# Funcoes auxiliares para ler variaveis de ambiente com um valor por defeito
-# e ja convertidas para o tipo certo (int / float).
-# Assim, se alguem escrever algo invalido no .env, nao rebenta tudo.
-# --------------------------------------------------------------------------
 def _env_texto(nome: str, defeito: str = "") -> str:
-    """Le uma variavel de ambiente como texto (string)."""
     valor = os.getenv(nome, defeito)
-    # .strip() remove espacos/enter acidentais no inicio/fim
     return valor.strip() if valor else defeito
 
 
 def _env_int(nome: str, defeito: int) -> int:
-    """Le uma variavel de ambiente e converte para inteiro."""
     try:
         return int(os.getenv(nome, str(defeito)))
     except (TypeError, ValueError):
-        # Se o valor no .env nao for um numero valido, usamos o defeito
         return defeito
 
 
 def _env_float(nome: str, defeito: float) -> float:
-    """Le uma variavel de ambiente e converte para numero decimal."""
     try:
         return float(os.getenv(nome, str(defeito)))
     except (TypeError, ValueError):
@@ -96,13 +39,11 @@ def _env_float(nome: str, defeito: float) -> float:
 # ==========================================================================
 # 1) RPC da Solana
 # ==========================================================================
-# URL do no RPC. Comeca no publico gratuito; troca para Helius/QuickNode
-# apenas mudando esta variavel no .env.
 SOLANA_RPC_URL = _env_texto("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 
 
 # ==========================================================================
-# 2) Camada 1 - DeepSeek (analise primaria, corre para TODOS os tokens)
+# 2) Camada 1 - DeepSeek
 # ==========================================================================
 DEEPSEEK_API_KEY = _env_texto("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = _env_texto("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
@@ -110,7 +51,7 @@ DEEPSEEK_MODEL = _env_texto("DEEPSEEK_MODEL", "deepseek-chat")
 
 
 # ==========================================================================
-# 3) Camada 2 - Claude (so corre na zona ambigua). OPCIONAL.
+# 3) Camada 2 - Claude (OPCIONAL)
 # ==========================================================================
 ANTHROPIC_API_KEY = _env_texto("ANTHROPIC_API_KEY")
 ANTHROPIC_MODEL = _env_texto("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
@@ -119,31 +60,14 @@ ANTHROPIC_MODEL = _env_texto("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 # ==========================================================================
 # 4) Comportamento do bot
 # ==========================================================================
-# Intervalo (segundos) entre cada procura de novos pools
 POLL_INTERVAL_SEGUNDOS = _env_int("POLL_INTERVAL_SEGUNDOS", 30)
-
-# Zona "ambigua" do score da Camada 1 que dispara a Camada 2 (Claude).
-# Convencao de score: 0 = seguro  ...  100 = perigoso/scam.
-# Se o score da Camada 1 ficar ENTRE estes dois valores, chamamos o Claude.
 ZONA_AMBIGUA_MIN = _env_int("ZONA_AMBIGUA_MIN", 40)
 ZONA_AMBIGUA_MAX = _env_int("ZONA_AMBIGUA_MAX", 70)
-
-# Liquidez minima (USD) considerada saudavel. Abaixo disto -> soma risco.
 LIQUIDEZ_MINIMA_USD = _env_float("LIQUIDEZ_MINIMA_USD", 2000.0)
-
-# Maximo de tokens a analisar por ciclo. Protege o RPC publico de rajadas
-# (aparecem muitos pools por minuto; nao vale a pena analisar tudo de uma vez).
 MAX_ANALISES_POR_CICLO = _env_int("MAX_ANALISES_POR_CICLO", 5)
-
-# Pausa (segundos) entre analisar um token e o seguinte, para ser "educado"
-# com o RPC e com as APIs de IA.
 PAUSA_ENTRE_TOKENS = _env_float("PAUSA_ENTRE_TOKENS", 1.0)
-
-# Rede a monitorizar na API de deteccao (GeckoTerminal usa "solana")
 REDE = "solana"
 
-# Mints "de referencia" (SOL / stablecoins). Servem para descobrir qual e o
-# token NOVO num par (o outro lado do par costuma ser um destes).
 MINT_SOL = "So11111111111111111111111111111111111111112"
 MINT_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 MINT_USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
@@ -151,39 +75,52 @@ MINTS_BASE_CONHECIDOS = {MINT_SOL, MINT_USDC, MINT_USDT}
 
 
 # ==========================================================================
-# 5) Pesos do score heuristico (calculado ANTES da IA, em analyzer.py)
-#    Podes afinar estes valores a vontade. Convencao: soma-se RISCO.
+# 5) Pesos do score heuristico
 # ==========================================================================
-PESO_FREEZE_AUTHORITY = 30   # existe autoridade de freeze -> podem congelar a tua carteira
-PESO_MINT_AUTHORITY = 25     # existe autoridade de mint   -> podem imprimir mais tokens
-PESO_HOLDER_ALTO = 25        # 1 holder detem > LIMITE_HOLDER_ALTO %
-PESO_HOLDER_MEDIO = 12       # 1 holder detem > LIMITE_HOLDER_MEDIO %
-PESO_LIQUIDEZ_BAIXA = 20     # liquidez < LIQUIDEZ_MINIMA_USD
-PESO_LIQUIDEZ_MEDIA = 10     # liquidez < 2x a minima
+PESO_FREEZE_AUTHORITY = 30
+PESO_MINT_AUTHORITY = 25
+PESO_HOLDER_ALTO = 25
+PESO_HOLDER_MEDIO = 12
+PESO_LIQUIDEZ_BAIXA = 20
+PESO_LIQUIDEZ_MEDIA = 10
 
-LIMITE_HOLDER_ALTO = 50.0    # em %
-LIMITE_HOLDER_MEDIO = 30.0   # em %
+LIMITE_HOLDER_ALTO = 50.0
+LIMITE_HOLDER_MEDIO = 30.0
 
 
 # ==========================================================================
-# 6) Funcoes de "estado da configuracao" - usadas no arranque (main.py)
-#    para avisar o utilizador do que esta ou nao configurado.
+# 6) Estado da configuracao (Fase 1)
 # ==========================================================================
 def camada1_configurada() -> bool:
-    """True se a chave da DeepSeek (Camada 1) estiver preenchida."""
     return bool(DEEPSEEK_API_KEY)
 
 
 def camada2_configurada() -> bool:
-    """True se a chave do Claude (Camada 2) estiver preenchida."""
     return bool(ANTHROPIC_API_KEY)
 
 
-def resumo() -> str:
-    """Devolve um pequeno resumo (texto) do estado da configuracao.
+# ==========================================================================
+# 7) FASE 2 - Execucao de trades
+# ==========================================================================
+DRY_RUN = _env_texto("DRY_RUN", "true").lower() in ("1", "true", "yes", "sim")
+SALDO_VIRTUAL_INICIAL = _env_float("SALDO_VIRTUAL_INICIAL", 200.0)
+WALLET_PRIVATE_KEY = _env_texto("WALLET_PRIVATE_KEY")
+MAX_TRADE_USD = _env_float("MAX_TRADE_USD", 5.0)
+SCORE_COMPRA_MAX = _env_int("SCORE_COMPRA_MAX", 20)
+STOP_LOSS_PCT = _env_float("STOP_LOSS_PCT", 20.0)
+TAKE_PROFIT_MULTIPLICADOR = _env_float("TAKE_PROFIT_MULTIPLICADOR", 2.0)
+TAKE_PROFIT_VENDER_PCT = _env_float("TAKE_PROFIT_VENDER_PCT", 50.0)
+TRAILING_STOP_PCT = _env_float("TRAILING_STOP_PCT", 15.0)
+SLIPPAGE_BPS = _env_int("SLIPPAGE_BPS", 500)
+FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
+INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)
 
-    Nunca imprime as chaves - so diz se estao 'ON' ou 'OFF'.
-    """
+
+def fase2_configurada() -> bool:
+    return bool(WALLET_PRIVATE_KEY)
+
+
+def resumo() -> str:
     linhas = [
         f"RPC Solana        : {SOLANA_RPC_URL}",
         f"Intervalo polling : {POLL_INTERVAL_SEGUNDOS}s",
@@ -191,58 +128,11 @@ def resumo() -> str:
         f"Liquidez minima   : {LIQUIDEZ_MINIMA_USD:.0f} USD",
         f"Camada 1 DeepSeek : {'ON (' + DEEPSEEK_MODEL + ')' if camada1_configurada() else 'OFF (sem chave -> usa score heuristico)'}",
         f"Camada 2 Claude   : {'ON (' + ANTHROPIC_MODEL + ')' if camada2_configurada() else 'OFF (opcional)'}",
+        f"Fase 2 (trading)  : {'ON, DRY_RUN=' + str(DRY_RUN) if fase2_configurada() else 'OFF (sem WALLET_PRIVATE_KEY)'}",
     ]
     return "\n".join(linhas)
 
 
-# Permite testar rapidamente:  python config.py
 if __name__ == "__main__":
     print("=== Configuracao carregada ===")
     print(resumo())
-# ==========================================================================
-# 7) FASE 2 - Execucao de trades
-# ==========================================================================
-# Modo de seguranca: em DRY_RUN, o bot simula compras/vendas e regista tudo,
-# mas NUNCA assina nem envia transacoes reais. O valor por defeito e SEMPRE
-# True - so passa a False se o utilizador mudar isto explicitamente no .env.
-DRY_RUN = _env_texto("DRY_RUN", "true").lower() in ("1", "true", "yes", "sim")
-
-# Chave privada da wallet dedicada ao bot, em formato base58 (o formato que
-# o Phantom/Solflare mostram ao exportar). NUNCA a wallet principal.
-WALLET_PRIVATE_KEY = _env_texto("WALLET_PRIVATE_KEY")
-
-# Limite maximo (USD) que o bot pode gastar numa unica compra.
-MAX_TRADE_USD = _env_float("MAX_TRADE_USD", 5.0)
-
-# So compra automaticamente se o score de risco final for <= a este valor.
-SCORE_COMPRA_MAX = _env_int("SCORE_COMPRA_MAX", 20)
-
-# Stop-loss: vender tudo se a posicao cair esta percentagem desde a compra.
-STOP_LOSS_PCT = _env_float("STOP_LOSS_PCT", 20.0)
-
-# Take-profit: vender esta percentagem da posicao quando o preco multiplicar
-# por TAKE_PROFIT_MULTIPLICADOR (2.0 = dobrou / +100%).
-TAKE_PROFIT_MULTIPLICADOR = _env_float("TAKE_PROFIT_MULTIPLICADOR", 2.0)
-TAKE_PROFIT_VENDER_PCT = _env_float("TAKE_PROFIT_VENDER_PCT", 50.0)
-
-# Trailing stop (%) aplicado ao que sobra da posicao depois do take-profit,
-# medido a partir do pico de preco atingido.
-TRAILING_STOP_PCT = _env_float("TRAILING_STOP_PCT", 15.0)
-
-# Slippage maximo tolerado nos swaps (em basis points; 100 = 1%).
-SLIPPAGE_BPS = _env_int("SLIPPAGE_BPS", 500)
-
-# Ficheiro local (JSON) onde ficam guardadas as posicoes abertas.
-FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
-
-# Intervalo (segundos) entre cada verificacao das posicoes abertas
-# (stop-loss / take-profit), independente de aparecerem tokens novos.
-INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)
-
-
-def fase2_configurada() -> bool:
-    """True se houver uma chave de wallet definida (mesmo em dry-run, e
-    preciso para simular saldos/enderecos de forma realista)."""
-    return bool(WALLET_PRIVATE_KEY)
-
-

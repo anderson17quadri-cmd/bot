@@ -1,0 +1,13 @@
+{
+  "BE8HLGrFUqUkYCvhxdmjWopBs7vWAm4xxhPbiZfxpump": {
+    "mint": "BE8HLGrFUqUkYCvhxdmjWopBs7vWAm4xxhPbiZfxpump",
+    "simbolo": "EARLY",
+    "valor_investido_usd": 5.0,
+    "preco_compra_usd": 2.441265556294686e-12,
+    "quantidade_tokens": 2048118029236.0,
+    "pico_preco_usd": 2.441265556294686e-12,
+    "take_profit_disparado": false,
+    "timestamp_compra": "2026-07-02T21:27:53.333909+00:00",
+    "dry_run": true
+  }
+}

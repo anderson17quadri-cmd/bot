@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 import requests
 
 import config
-
+import html
 # Endpoint da GeckoTerminal que lista os pools mais recentes de uma rede.
 # Documentacao: https://www.geckoterminal.com/dex-api
 URL_NOVOS_POOLS = f"https://api.geckoterminal.com/api/v2/networks/{config.REDE}/new_pools"
@@ -85,7 +85,7 @@ def _interpretar_pool(pool: dict) -> dict | None:
     dex = rel.get("dex", {}).get("data", {}).get("id", "?")
 
     # O "name" costuma ser "SIMBOLO_BASE / SIMBOLO_QUOTE" (ex: "favier / SOL")
-    nome_par = attrs.get("name", "?")
+    nome_par = html.unescape(attrs.get("name", "?"))
     partes = [p.strip() for p in nome_par.split("/")]
     simbolo_base = partes[0] if len(partes) >= 1 else "?"
     simbolo_quote = partes[1] if len(partes) >= 2 else "?"
