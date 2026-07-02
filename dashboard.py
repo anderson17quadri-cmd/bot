@@ -68,6 +68,14 @@ def _ler_posicoes() -> dict:
     return _ler_json(config.FICHEIRO_POSICOES, {})
 
 
+def _ler_radar() -> list:
+    """radar.json - ultimos tokens detetados/analisados pelo bot
+    (comprados ou nao). Escrito pelo main.py atraves do radar.py."""
+    dados = _ler_json("radar.json", [])
+    # Protege contra o ficheiro ter sido editado a mao para outro formato
+    return dados if isinstance(dados, list) else []
+
+
 # ==========================================================================
 # Cotacao Jupiter (preco atual estimado das posicoes abertas)
 # ==========================================================================
@@ -225,6 +233,13 @@ def api_posicoes():
     # Mais recente primeiro, como na tabela de historico
     lista.sort(key=lambda p: p.get("timestamp_compra") or "", reverse=True)
     return jsonify({"posicoes": lista})
+
+
+@app.route("/api/radar")
+def api_radar():
+    """Devolve os ultimos tokens que o bot detetou e analisou (o radar.py
+    ja guarda com o mais recente primeiro e limitado a 50 registos)."""
+    return jsonify({"radar": _ler_radar()})
 
 
 if __name__ == "__main__":

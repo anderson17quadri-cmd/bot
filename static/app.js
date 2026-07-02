@@ -19,7 +19,7 @@ const COR_VERMELHO = css.getPropertyValue("--vermelho").trim();
 const COR_TEXTO_MUDO = css.getPropertyValue("--texto-mudo").trim();
 const COR_GRELHA = css.getPropertyValue("--linha-grelha").trim();
 
-const INTERVALO_POLLING_MS = 8000; // pede dados novos a cada 8 segundos
+const INTERVALO_POLLING_MS = 4000; // pede dados novos a cada 4 segundos
 
 // ==========================================================================
 // 1) Funcoes de formatacao
@@ -72,6 +72,13 @@ function pintarPorSinal(elemento, valor) {
 
 /** Atalho para document.getElementById - usado em todo o lado */
 function el(id) { return document.getElementById(id); }
+
+/** Mostra o grafico OU a mensagem de vazio, nunca os dois ao mesmo tempo.
+    (Um grafico com a grelha vazia por cima da mensagem era confuso.) */
+function alternarVazio(canvas, idMensagem, temDados) {
+  canvas.closest(".area-grafico").hidden = !temDados;
+  el(idMensagem).hidden = temDados;
+}
 
 // ==========================================================================
 // 2) Criacao dos graficos (comecam vazios, o polling enche-os)
@@ -138,7 +145,13 @@ const graficoVelas = new Chart(el("grafico-velas"), {
       legend: { display: false },
       tooltip: {
         callbacks: {
-          // No tooltip mostra o lucro real, nao o par [0, lucro]
+          // Titulo do tooltip: simbolo + data/hora da venda (a data vem
+          // guardada junto de cada barra, no campo extra "dataVenda")
+          title: (itens) => {
+            const i = itens[0];
+            return `${i.label} · ${graficoVelas.data.datasets[0].datasVendas[i.dataIndex] || ""}`;
+          },
+          // Corpo: o lucro real, nao o par [0, lucro]
           label: (ctx) => " " + dinheiroComSinal(ctx.raw[1]),
         },
       },
@@ -182,7 +195,7 @@ async function atualizarResumo() {
   // --- Grafico da curva de saldo ---
   const curva = dados.curva_saldo;
   const temTrades = curva.length > 1; // o 1.o ponto e so o saldo inicial
-  el("vazio-saldo").hidden = temTrades;
+  alternarVazio(graficoSaldo.canvas, "vazio-saldo", temTrades);
   graficoSaldo.data.labels = curva.map((p) => (p.timestamp ? dataHora(p.timestamp) : "início"));
   graficoSaldo.data.datasets[0].data = curva.map((p) => p.saldo);
   graficoSaldo.update();
@@ -191,12 +204,14 @@ async function atualizarResumo() {
   const gp = dados.ganhos_perdas;
   el("gp-ganho").textContent = dinheiro(gp.total_ganho);
   el("gp-perdido").textContent = dinheiro(gp.total_perdido);
-  el("vazio-velas").hidden = gp.velas.length > 0;
+  alternarVazio(graficoVelas.canvas, "vazio-velas", gp.velas.length > 0);
   graficoVelas.data.labels = gp.velas.map((v) => v.simbolo);
   graficoVelas.data.datasets[0].data = gp.velas.map((v) => [0, v.lucro_usd]); // barra de 0 ate ao lucro
   graficoVelas.data.datasets[0].backgroundColor = gp.velas.map(
     (v) => (v.lucro_usd >= 0 ? COR_VERDE : COR_VERMELHO)
   );
+  // Datas das vendas para o tooltip (campo extra nosso, o Chart.js ignora-o)
+  graficoVelas.data.datasets[0].datasVendas = gp.velas.map((v) => dataHora(v.timestamp));
   graficoVelas.update();
 
   // --- Tabela de historico (mais recente primeiro, ja vem ordenada) ---
@@ -246,13 +261,41 @@ async function atualizarPosicoes() {
   }).join("");
 }
 
+/** Atualiza o radar: TODOS os tokens que o bot detetou e analisou,
+    comprados ou nao - uma janela para o que se passa no mercado */
+async function atualizarRadar() {
+  const resposta = await fetch("/api/radar");
+  const dados = await resposta.json();
+  const radar = dados.radar;
+
+  el("vazio-radar").hidden = radar.length > 0;
+  el("tabela-radar").innerHTML = radar.map((r) => {
+    // Cor do score: verde = seguro, amarelo = medio, vermelho = arriscado
+    let classeScore = "score-alto";
+    if (r.score < 30) classeScore = "score-baixo";
+    else if (r.score <= 60) classeScore = "score-medio";
+
+    // Tag COMPRADO junto ao simbolo (1.a coluna, sempre visivel no
+    // telemovel - na ultima coluna ficava escondida pelo scroll)
+    const tagComprado = r.comprado ? ' <span class="tag comprado">COMPRADO</span>' : "";
+
+    return `<tr>
+      <td>${r.simbolo || "?"}${tagComprado}</td>
+      <td><span class="pastilha ${classeScore}">${r.score}</span></td>
+      <td>${dinheiro(r.liquidez_usd)}</td>
+      <td>${r.dex || "?"}</td>
+      <td>${tempoDecorrido(r.timestamp)}</td>
+    </tr>`;
+  }).join("");
+}
+
 /** Um ciclo completo de atualizacao. try/catch para que uma falha de
     rede momentanea nao mate o polling - tenta outra vez no proximo ciclo */
 async function atualizarTudo() {
   try {
-    // As duas chamadas em paralelo (a de posicoes pode demorar por
+    // As tres chamadas em paralelo (a de posicoes pode demorar por
     // causa das cotacoes Jupiter; assim nao atrasa os cartoes)
-    await Promise.all([atualizarResumo(), atualizarPosicoes()]);
+    await Promise.all([atualizarResumo(), atualizarPosicoes(), atualizarRadar()]);
     el("ultima-atualizacao").textContent =
       "Atualizado às " + new Date().toLocaleTimeString("pt-PT");
   } catch (erro) {
@@ -261,6 +304,6 @@ async function atualizarTudo() {
   }
 }
 
-// Arranque: atualiza ja, e depois repete a cada 8 segundos
+// Arranque: atualiza ja, e depois repete a cada INTERVALO_POLLING_MS
 atualizarTudo();
 setInterval(atualizarTudo, INTERVALO_POLLING_MS);

@@ -25,6 +25,7 @@ import ai_layer1
 import ai_layer2
 import executor
 import posicoes
+import radar
 
 
 def avaliar_com_ia(dados: dict) -> dict:
@@ -202,6 +203,16 @@ def processar_pool(pool: dict) -> None:
     analise_ia = avaliar_com_ia(dados)
     alerts.mostrar_alerta(dados, analise_ia)
     tentar_comprar(dados, analise_ia)
+
+    # Regista o token no radar (radar.json), comprado ou nao - e isto
+    # que alimenta a seccao "Radar ao vivo" do dashboard. Se a posicao
+    # existir agora nas posicoes abertas, e porque a compra aconteceu.
+    try:
+        comprado = dados["token_mint"] in posicoes.listar_posicoes_abertas()
+        radar.registar_analise(dados, analise_ia, comprado)
+    except Exception as e:
+        # O radar e so informativo: uma falha aqui nunca para o bot
+        alerts.info(f"[yellow]Nao consegui registar no radar:[/yellow] {e}")
 
 
 def main() -> None:

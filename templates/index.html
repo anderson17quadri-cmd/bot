@@ -44,7 +44,7 @@
 
   <!-- ================= 2. CURVA DE SALDO ================= -->
   <section class="painel">
-    <h2>Evolução do saldo</h2>
+    <h2>📈 Evolução do saldo</h2>
     <div class="area-grafico">
       <canvas id="grafico-saldo"></canvas>
     </div>
@@ -53,7 +53,7 @@
 
   <!-- ================= 3. GANHOS VS PERDAS (velas de P/L) ================= -->
   <section class="painel">
-    <h2>Ganhos vs Perdas por trade</h2>
+    <h2>🕯️ Ganhos vs Perdas por trade</h2>
     <!-- Totais por cima do grafico, com as mesmas cores das velas -->
     <p class="totais-gp">
       <span class="ganho">▲ Ganho: <b id="gp-ganho">–</b></span>
@@ -62,12 +62,12 @@
     <div class="area-grafico">
       <canvas id="grafico-velas"></canvas>
     </div>
-    <p class="vazio" id="vazio-velas" hidden>Sem vendas fechadas ainda — cada venda vira uma vela verde (lucro) ou vermelha (prejuízo).</p>
+    <p class="vazio" id="vazio-velas" hidden>Ainda sem vendas fechadas — aparecem aqui quando o stop-loss ou take-profit disparar. Cada venda vira uma vela: verde se deu lucro, vermelha se deu prejuízo.</p>
   </section>
 
   <!-- ================= 4. POSICOES ABERTAS ================= -->
   <section class="painel">
-    <h2>Posições abertas <span class="ao-vivo">● ao vivo</span></h2>
+    <h2>🎯 Posições abertas <span class="ao-vivo">● ao vivo</span></h2>
     <div class="tabela-scroll">
       <table>
         <thead>
@@ -87,9 +87,31 @@
     <p class="vazio" id="vazio-posicoes" hidden>Nenhuma posição aberta neste momento.</p>
   </section>
 
-  <!-- ================= 5. HISTORICO DE TRADES ================= -->
+  <!-- ================= 5. RADAR PUMP.FUN (detecao ao vivo) ================= -->
+  <!-- Diferente das posicoes abertas: aqui aparecem TODOS os tokens que
+       o bot detetou e analisou, mesmo os que decidiu NAO comprar -->
   <section class="painel">
-    <h2>Histórico de trades</h2>
+    <h2>📡 Radar de tokens <span class="ao-vivo">● ao vivo</span></h2>
+    <div class="tabela-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Símbolo</th>
+            <th>Score</th>
+            <th>Liquidez</th>
+            <th>DEX</th>
+            <th>Detetado há</th>
+          </tr>
+        </thead>
+        <tbody id="tabela-radar"></tbody>
+      </table>
+    </div>
+    <p class="vazio" id="vazio-radar" hidden>O radar está vazio — os tokens aparecem aqui à medida que o bot os deteta e analisa.</p>
+  </section>
+
+  <!-- ================= 6. HISTORICO DE TRADES ================= -->
+  <section class="painel">
+    <h2>📋 Histórico de trades</h2>
     <div class="tabela-scroll">
       <table>
         <thead>
