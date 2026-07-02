@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <!-- viewport: essencial para a pagina se adaptar ao ecra do telemovel -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sniper Bot - Dashboard</title>
+
+  <!-- Chart.js (biblioteca de graficos) servido localmente a partir de
+       static/ - assim o dashboard funciona mesmo sem internet.
+       (E a versao 4.4.3, descarregada do CDN jsdelivr uma unica vez.) -->
+  <script src="{{ url_for('static', filename='chart.umd.min.js') }}"></script>
+
+  <!-- O nosso CSS (Flask serve tudo o que esta em static/ automaticamente) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <!-- ================= CABECALHO ================= -->
+  <header>
+    <h1>Sniper Bot <span class="subtitulo">Solana</span></h1>
+    <!-- Badge do modo: o app.js poe aqui DRY RUN ou REAL e a cor certa -->
+    <div id="badge-modo" class="badge">a carregar...</div>
+  </header>
+
+  <!-- Ultima atualizacao (o polling escreve aqui a hora de cada refresh) -->
+  <p id="ultima-atualizacao" class="atualizacao">a ligar ao bot...</p>
+
+  <!-- ================= 1. CARTOES DE RESUMO ================= -->
+  <section class="cartoes">
+    <div class="cartao"><span class="rotulo">Saldo inicial</span><span class="valor" id="c-saldo-inicial">–</span></div>
+    <div class="cartao"><span class="rotulo">Saldo livre</span><span class="valor" id="c-saldo-livre">–</span></div>
+    <div class="cartao"><span class="rotulo">Em posições</span><span class="valor" id="c-valor-posicoes">–</span></div>
+    <div class="cartao"><span class="rotulo">Valor total</span><span class="valor" id="c-valor-total">–</span></div>
+    <!-- Este cartao ocupa a largura toda: e o numero mais importante -->
+    <div class="cartao destaque">
+      <span class="rotulo">Lucro / Prejuízo total</span>
+      <span class="valor grande" id="c-lucro-total">–</span>
+    </div>
+    <div class="cartao"><span class="rotulo">Compras</span><span class="valor" id="c-n-compras">–</span></div>
+    <div class="cartao"><span class="rotulo">Vendas</span><span class="valor" id="c-n-vendas">–</span></div>
+    <div class="cartao"><span class="rotulo">Win rate</span><span class="valor" id="c-win-rate">–</span></div>
+  </section>
+
+  <!-- ================= 2. CURVA DE SALDO ================= -->
+  <section class="painel">
+    <h2>Evolução do saldo</h2>
+    <div class="area-grafico">
+      <canvas id="grafico-saldo"></canvas>
+    </div>
+    <p class="vazio" id="vazio-saldo" hidden>Sem trades ainda — o gráfico aparece quando o bot fizer a primeira operação.</p>
+  </section>
+
+  <!-- ================= 3. GANHOS VS PERDAS (velas de P/L) ================= -->
+  <section class="painel">
+    <h2>Ganhos vs Perdas por trade</h2>
+    <!-- Totais por cima do grafico, com as mesmas cores das velas -->
+    <p class="totais-gp">
+      <span class="ganho">▲ Ganho: <b id="gp-ganho">–</b></span>
+      <span class="perda">▼ Perdido: <b id="gp-perdido">–</b></span>
+    </p>
+    <div class="area-grafico">
+      <canvas id="grafico-velas"></canvas>
+    </div>
+    <p class="vazio" id="vazio-velas" hidden>Sem vendas fechadas ainda — cada venda vira uma vela verde (lucro) ou vermelha (prejuízo).</p>
+  </section>
+
+  <!-- ================= 4. POSICOES ABERTAS ================= -->
+  <section class="painel">
+    <h2>Posições abertas <span class="ao-vivo">● ao vivo</span></h2>
+    <div class="tabela-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Símbolo</th>
+            <th>Investido</th>
+            <th>Preço compra</th>
+            <th>Quantidade</th>
+            <th>Aberta há</th>
+            <th>Valor atual</th>
+            <th>P/L</th>
+          </tr>
+        </thead>
+        <tbody id="tabela-posicoes"></tbody>
+      </table>
+    </div>
+    <p class="vazio" id="vazio-posicoes" hidden>Nenhuma posição aberta neste momento.</p>
+  </section>
+
+  <!-- ================= 5. HISTORICO DE TRADES ================= -->
+  <section class="painel">
+    <h2>Histórico de trades</h2>
+    <div class="tabela-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Data / hora</th>
+            <th>Tipo</th>
+            <th>Símbolo</th>
+            <th>Valor</th>
+            <th>Lucro</th>
+          </tr>
+        </thead>
+        <tbody id="tabela-historico"></tbody>
+      </table>
+    </div>
+    <p class="vazio" id="vazio-historico" hidden>Sem trades no histórico — quando o bot comprar ou vender, aparece aqui.</p>
+  </section>
+
+  <!-- O JavaScript vai no fim do body: assim o HTML acima ja existe
+       quando o script corre e procura os elementos por id -->
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

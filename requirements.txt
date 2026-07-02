@@ -8,3 +8,8 @@ python-dotenv>=1.0    # ler variaveis de ambiente do ficheiro .env
 openai>=1.30          # cliente da Camada 1 (DeepSeek e compativel com a API OpenAI)
 anthropic>=0.34       # cliente da Camada 2 (Claude / Sonnet)
 rich>=13.7            # imprimir alertas bonitos e legiveis na consola
+
+# ============================================================
+# Dashboard web local (dashboard.py) - tambem pure-Python
+# ============================================================
+flask>=3.0            # servidor web do dashboard (localhost:5000)

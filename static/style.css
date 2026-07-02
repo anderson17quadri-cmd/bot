@@ -1,0 +1,160 @@
+/* ==========================================================================
+   style.css - tema escuro do dashboard
+   ==========================================================================
+   As cores estao definidas como "variaveis CSS" (--nome) no :root.
+   Assim, se um dia quiseres mudar o tema, mudas so aqui em cima e o
+   resto do ficheiro atualiza-se sozinho.
+   Paleta validada para fundo escuro (contraste e daltonismo).
+   ========================================================================== */
+
+:root {
+  --fundo-pagina:   #0d0d0d;   /* fundo geral da pagina */
+  --fundo-painel:   #1a1a19;   /* fundo dos cartoes e paineis */
+  --texto:          #ffffff;   /* texto principal */
+  --texto-suave:    #c3c2b7;   /* texto secundario */
+  --texto-mudo:     #898781;   /* rotulos, eixos, detalhes */
+  --linha-grelha:   #2c2c2a;   /* linhas finas das grelhas dos graficos */
+  --linha-borda:    rgba(255, 255, 255, 0.10); /* contornos subtis */
+
+  --azul:           #3987e5;   /* serie principal (curva de saldo) */
+  --verde:          #0ca30c;   /* lucro / ganho */
+  --vermelho:       #d03b3b;   /* prejuizo / perda / modo REAL */
+  --amarelo:        #fab219;   /* aviso / modo DRY RUN */
+}
+
+/* Reset basico: tira margens por defeito e usa box-sizing previsivel */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--fundo-pagina);
+  color: var(--texto);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 16px;
+  max-width: 900px;      /* no PC nao estica demasiado */
+  margin: 0 auto;        /* centra a pagina */
+}
+
+/* ================= Cabecalho ================= */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+h1 { font-size: 1.35rem; }
+h1 .subtitulo { color: var(--texto-mudo); font-weight: 400; }
+
+/* Badge do modo (DRY RUN / REAL) - tem de ser impossivel de nao ver */
+.badge {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.5px;
+  background: var(--fundo-painel);
+  color: var(--texto-mudo);
+  border: 1px solid var(--linha-borda);
+}
+.badge.dry-run { background: rgba(250, 178, 25, 0.15); color: var(--amarelo); border-color: var(--amarelo); }
+.badge.real    { background: rgba(208, 59, 59, 0.18);  color: #ff6b6b;       border-color: var(--vermelho); }
+
+.atualizacao {
+  color: var(--texto-mudo);
+  font-size: 0.78rem;
+  margin: 6px 0 16px;
+}
+
+/* ================= Cartoes de resumo ================= */
+.cartoes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);  /* 2 colunas no telemovel */
+  gap: 10px;
+  margin-bottom: 20px;
+}
+@media (min-width: 700px) {
+  .cartoes { grid-template-columns: repeat(4, 1fr); }  /* 4 no PC */
+}
+
+.cartao {
+  background: var(--fundo-painel);
+  border: 1px solid var(--linha-borda);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cartao .rotulo { color: var(--texto-mudo); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.4px; }
+.cartao .valor  { font-size: 1.15rem; font-weight: 600; }
+.cartao .valor.grande { font-size: 1.6rem; }
+
+/* O cartao de lucro total ocupa a linha inteira */
+.cartao.destaque { grid-column: 1 / -1; }
+
+/* Cores do lucro: aplicadas pelo app.js consoante o sinal */
+.positivo { color: var(--verde); }
+.negativo { color: #ff6b6b; }  /* vermelho mais claro para texto legivel */
+
+/* ================= Paineis (graficos e tabelas) ================= */
+.painel {
+  background: var(--fundo-painel);
+  border: 1px solid var(--linha-borda);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.painel h2 { font-size: 1rem; margin-bottom: 12px; color: var(--texto-suave); }
+
+.ao-vivo { color: var(--verde); font-size: 0.7rem; font-weight: 400; }
+
+/* Altura fixa para os graficos: sem isto o Chart.js pode crescer sem parar */
+.area-grafico { position: relative; height: 240px; }
+
+/* Totais por cima do grafico de velas */
+.totais-gp { display: flex; gap: 18px; font-size: 0.85rem; margin-bottom: 10px; }
+.totais-gp .ganho { color: var(--verde); }
+.totais-gp .perda { color: #ff6b6b; }
+
+/* ================= Tabelas ================= */
+/* As tabelas podem ser largas demais para o telemovel:
+   este contentor deixa-as deslizar na horizontal sem partir a pagina */
+.tabela-scroll { overflow-x: auto; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  white-space: nowrap;               /* cada celula numa linha so */
+  font-variant-numeric: tabular-nums; /* algarismos alinhados em coluna */
+}
+th {
+  text-align: left;
+  color: var(--texto-mudo);
+  font-weight: 500;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--linha-grelha);
+}
+td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--linha-grelha);
+  color: var(--texto-suave);
+}
+tr:last-child td { border-bottom: none; }
+
+/* Etiqueta pequena de compra/venda na tabela de historico */
+.tag { padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; }
+.tag.compra { background: rgba(57, 135, 229, 0.18); color: var(--azul); }
+.tag.venda  { background: rgba(12, 163, 12, 0.15);  color: var(--verde); }
+
+/* Mensagens de estado vazio (quando ainda nao ha dados) */
+.vazio {
+  color: var(--texto-mudo);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 24px 8px;
+}
