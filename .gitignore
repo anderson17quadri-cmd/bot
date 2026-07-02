@@ -1,0 +1,20 @@
+# ============================================================
+# NUNCA versionar segredos nem lixo do ambiente
+# ============================================================
+
+# Segredos (chaves de API) -> NUNCA vao para o git
+.env
+
+# Ambiente virtual de Python
+.venv/
+venv/
+
+# Caches do Python
+__pycache__/
+*.pyc
+
+# Ficheiro de estado (tokens ja vistos) - opcional
+seen.json
+
+# Logs
+*.log

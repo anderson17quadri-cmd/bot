@@ -1,0 +1,10 @@
+# ============================================================
+# Dependencias do Sniper Bot Solana - Fase 1 (modo alerta)
+# Todas sao "pure-Python" -> instalam sem compilar nada (bom para Termux/aarch64)
+# ============================================================
+
+requests>=2.31        # chamadas HTTP: RPC da Solana + API de novos pools
+python-dotenv>=1.0    # ler variaveis de ambiente do ficheiro .env
+openai>=1.30          # cliente da Camada 1 (DeepSeek e compativel com a API OpenAI)
+anthropic>=0.34       # cliente da Camada 2 (Claude / Sonnet)
+rich>=13.7            # imprimir alertas bonitos e legiveis na consola
