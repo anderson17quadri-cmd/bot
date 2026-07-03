@@ -37,6 +37,8 @@
       <g id="i-radar"><path d="M12 12L19 5"/><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7a5 5 0 1 0 5 5"/><circle cx="12" cy="12" r="1"/></g>
       <!-- lista / historico -->
       <g id="i-lista"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></g>
+      <!-- olho / watchlist -->
+      <g id="i-olho"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></g>
       <!-- terminal / log -->
       <g id="i-terminal"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 9l4 3-4 3M12 15h6"/></g>
       <!-- caixa vazia (estados sem dados) -->
@@ -153,6 +155,7 @@
               <th>Aberta há</th>
               <th>Valor atual</th>
               <th>P/L</th>
+              <th>Vender</th>
             </tr>
           </thead>
           <tbody id="tabela-posicoes"></tbody>
@@ -164,7 +167,35 @@
       </div>
     </section>
 
-    <!-- ================= 6. RADAR PUMP.FUN (detecao ao vivo) ================= -->
+    <!-- ================= 6. WATCHLIST (tokens fronteira) ================= -->
+    <!-- Tokens com score ACIMA do limiar de compra automatica mas por
+         pouco: o bot nao compra, mas continua a reavalia-los (preco,
+         liquidez viva) para decidires manualmente -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-olho"/></svg> Watchlist <span class="ao-vivo">● reavaliada pelo bot</span></h2>
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Símbolo</th>
+              <th>Score</th>
+              <th>Conf.</th>
+              <th>Liquidez</th>
+              <th>Estado</th>
+              <th>Há</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-watchlist"></tbody>
+        </table>
+      </div>
+      <div class="vazio" id="vazio-watchlist" hidden>
+        <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-olho"/></svg>
+        <p>Watchlist vazia — tokens com score perto do limiar de compra aparecem aqui para decidires manualmente.</p>
+      </div>
+    </section>
+
+    <!-- ================= 7. RADAR PUMP.FUN (detecao ao vivo) ================= -->
     <!-- Diferente das posicoes abertas: aqui aparecem TODOS os tokens que
          o bot detetou e analisou, mesmo os que decidiu NAO comprar -->
     <section class="painel">
@@ -189,7 +220,7 @@
       </div>
     </section>
 
-    <!-- ================= 7. HISTORICO DE TRADES ================= -->
+    <!-- ================= 8. HISTORICO DE TRADES ================= -->
     <section class="painel">
       <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-lista"/></svg> Histórico de trades</h2>
       <div class="tabela-scroll">
@@ -243,6 +274,24 @@
         <button class="btn btn-neutro" data-fechar>Cancelar</button>
         <!-- So fica ativo quando o texto for exatamente CONFIRMO -->
         <button class="btn btn-perigo" id="btn-real-confirmar" disabled>Ativar modo REAL</button>
+      </div>
+    </div>
+
+    <!-- Modal D: confirmacao de acoes de trading manual (comprar/vender).
+         O app.js preenche o titulo/texto e, em modo REAL, mostra tambem
+         a caixa CONFIRMO (obrigatoria - o backend exige a palavra) -->
+    <div class="modal" id="modal-acao" hidden>
+      <h3 id="acao-titulo">Confirmar</h3>
+      <p id="acao-texto"></p>
+      <p class="texto-perigo" id="acao-aviso-real" hidden>
+        Estás em modo <b>REAL</b> — esta ação usa <b>dinheiro verdadeiro</b>.
+        Escreve <b>CONFIRMO</b> para continuar:
+      </p>
+      <input type="text" id="acao-confirmo" class="campo-texto num" hidden
+             autocomplete="off" autocapitalize="characters" placeholder="CONFIRMO">
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="acao-confirmar">Confirmar</button>
       </div>
     </div>
 

@@ -194,6 +194,7 @@ h1 .subtitulo { color: var(--accent); font-weight: 600; font-size: 0.7rem; lette
 .btn-perigo { background: rgba(255, 92, 122, 0.16); color: var(--vermelho); border-color: rgba(255, 92, 122, 0.4); }
 .btn-neutro { background: var(--fundo-elevado); color: var(--texto-suave); border-color: var(--linha-grelha); }
 .btn-pequeno { padding: 5px 12px; font-size: 0.75rem; }
+.btn-mini    { padding: 4px 9px;  font-size: 0.68rem; border-radius: 7px; }
 
 /* Anel de foco acessivel na cor accent (teclado / leitores) */
 .btn:focus-visible, .segmento:focus-visible, .campo-texto:focus-visible {
@@ -430,6 +431,20 @@ tr:last-child td { border-bottom: none; }
 .pastilha.score-baixo { background: rgba(46, 224, 111, 0.13); color: var(--verde); }
 .pastilha.score-medio { background: rgba(250, 178, 25, 0.14); color: var(--amarelo); }
 .pastilha.score-alto  { background: rgba(255, 92, 122, 0.14); color: var(--vermelho); }
+
+/* Simbolo clicavel: abre o grafico do token (DexScreener/pump.fun) */
+.link-token {
+  color: var(--texto);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--accent);
+  transition: color 0.15s;
+}
+.link-token:hover { color: var(--accent); }
+
+/* Estado da liquidez na watchlist (reavaliado pelo bot a cada ciclo) */
+.estado-liq { color: var(--texto-mudo); font-size: 0.72rem; font-family: var(--fonte-texto); }
+.estado-liq.viva  { color: var(--verde); }
+.estado-liq.morta { color: var(--vermelho); }
 
 /* ==========================================================================
    ESTADOS VAZIOS (icone grande + mensagem amigavel)

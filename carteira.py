@@ -59,9 +59,12 @@ def saldo_disponivel() -> float:
     return _carregar()["saldo_atual_usd"]
 
 
-def registar_compra(simbolo: str, valor_usd: float) -> bool:
+def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None) -> bool:
     """Debita o valor da compra do saldo virtual. Devolve False (e nao
-    debita nada) se nao houver saldo suficiente."""
+    debita nada) se nao houver saldo suficiente.
+
+    'mint' e opcional (registos antigos nao o tem): serve para o
+    dashboard poder abrir o grafico do token (DexScreener) no historico."""
     dados = _carregar()
     if dados["saldo_atual_usd"] < valor_usd:
         return False
@@ -69,13 +72,15 @@ def registar_compra(simbolo: str, valor_usd: float) -> bool:
     dados["saldo_atual_usd"] -= valor_usd
     dados["historico"].append({
         "tipo": "compra", "simbolo": simbolo, "valor_usd": valor_usd,
+        "mint": mint,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     _guardar(dados)
     return True
 
 
-def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd: float) -> None:
+def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd: float,
+                   mint: str | None = None) -> None:
     """Credita o valor recebido da venda no saldo virtual e regista o
     lucro/prejuizo realizado dessa operacao."""
     dados = _carregar()
@@ -84,6 +89,7 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
     dados["historico"].append({
         "tipo": "venda", "simbolo": simbolo,
         "valor_usd": valor_recebido_usd, "lucro_usd": round(lucro, 4),
+        "mint": mint,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     _guardar(dados)

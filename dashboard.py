@@ -483,6 +483,132 @@ def api_bot_log():
 
 
 # --------------------------------------------------------------------------
+# Watchlist (tokens fronteira) e acoes de trading manual
+# --------------------------------------------------------------------------
+def _carregar_executor():
+    """Importa o executor SO quando e preciso (lazy import).
+
+    O executor puxa o 'solders' (biblioteca nativa) atraves do wallet.py.
+    Importa-lo aqui em cima faria o dashboard rebentar em maquinas onde
+    o solders nao esta instalado - e para VER os dados ele nao e preciso,
+    so para as acoes de compra/venda."""
+    import executor  # noqa - import local proposital
+    return executor
+
+
+def _exigir_confirmo_em_modo_real(corpo: dict):
+    """Em modo REAL, qualquer acao de trading manual exige a palavra
+    CONFIRMO no proprio pedido (mesma defesa em camadas do /api/modo:
+    o browser nao e a unica barreira). Devolve uma resposta de erro
+    ou None se estiver tudo bem."""
+    if _ler_dry_run_do_env():
+        return None  # modo simulado: dinheiro falso, sem barreira extra
+    if corpo.get("confirmacao") != "CONFIRMO":
+        return jsonify({
+            "ok": False,
+            "erro": "Modo REAL: esta ação usa dinheiro verdadeiro e exige a palavra CONFIRMO.",
+        }), 400
+    return None
+
+
+@app.route("/api/watchlist")
+def api_watchlist():
+    """Tokens fronteira (score perto do limiar) a espera de decisao manual."""
+    import watchlist
+    return jsonify({"watchlist": watchlist.carregar_watchlist()})
+
+
+@app.route("/api/watchlist/seguir", methods=["POST"])
+def api_watchlist_seguir():
+    """Marca/desmarca um token como 'seguido' (nunca sai da watchlist
+    por antiguidade enquanto estiver seguido)."""
+    import watchlist
+    corpo = request.get_json(silent=True) or {}
+    mint = corpo.get("mint", "")
+    if not mint:
+        return jsonify({"ok": False, "erro": "Pedido inválido: falta o mint."}), 400
+    if not watchlist.marcar_seguir(mint, bool(corpo.get("seguir", True))):
+        return jsonify({"ok": False, "erro": "Token já não está na watchlist."}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/comprar", methods=["POST"])
+def api_comprar():
+    """Compra manual (a partir da watchlist): MAX_TRADE_USD do token.
+    Em modo REAL exige a palavra CONFIRMO no pedido."""
+    corpo = request.get_json(silent=True) or {}
+    mint = corpo.get("mint", "")
+    if not mint:
+        return jsonify({"ok": False, "erro": "Pedido inválido: falta o mint."}), 400
+
+    erro = _exigir_confirmo_em_modo_real(corpo)
+    if erro:
+        return erro
+
+    if mint in _ler_posicoes():
+        return jsonify({"ok": False, "erro": "Já existe uma posição aberta neste token."}), 409
+
+    import watchlist
+    entrada = next(
+        (r for r in watchlist.carregar_watchlist() if r.get("mint") == mint), None
+    )
+    simbolo = (entrada or {}).get("simbolo") or corpo.get("simbolo") or "?"
+
+    try:
+        executor = _carregar_executor()
+        # Preco do SOL para converter MAX_TRADE_USD em lamports
+        cot_sol = executor._obter_cotacao(config.MINT_SOL, config.MINT_USDC, 1_000_000_000)
+        preco_sol_usd = float(cot_sol["outAmount"]) / 1_000_000
+        resultado = executor.comprar_token(
+            mint=mint, simbolo=simbolo,
+            valor_usd=config.MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
+        )
+    except ImportError:
+        return jsonify({"ok": False, "erro": "Biblioteca 'solders' não instalada — instala as dependências do bot."}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "erro": f"Falha na compra: {e}"}), 500
+
+    if resultado.get("sucesso"):
+        watchlist.remover(mint)  # comprado -> sai da watchlist (passa a posicao)
+    return jsonify({"ok": bool(resultado.get("sucesso")),
+                    "mensagem": resultado.get("mensagem", ""),
+                    "dry_run": resultado.get("dry_run")})
+
+
+@app.route("/api/vender", methods=["POST"])
+def api_vender():
+    """Venda manual de uma posicao aberta: {"mint": ..., "percentagem": 50|100}.
+    Em modo REAL exige a palavra CONFIRMO no pedido."""
+    corpo = request.get_json(silent=True) or {}
+    mint = corpo.get("mint", "")
+    try:
+        percentagem = float(corpo.get("percentagem", 0))
+    except (TypeError, ValueError):
+        percentagem = 0
+    if not mint or not (0 < percentagem <= 100):
+        return jsonify({"ok": False, "erro": "Pedido inválido: preciso de mint e percentagem (1-100)."}), 400
+
+    erro = _exigir_confirmo_em_modo_real(corpo)
+    if erro:
+        return erro
+
+    if mint not in _ler_posicoes():
+        return jsonify({"ok": False, "erro": "Não há posição aberta neste token."}), 404
+
+    try:
+        executor = _carregar_executor()
+        resultado = executor.vender_token(mint, percentagem)
+    except ImportError:
+        return jsonify({"ok": False, "erro": "Biblioteca 'solders' não instalada — instala as dependências do bot."}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "erro": f"Falha na venda: {e}"}), 500
+
+    return jsonify({"ok": bool(resultado.get("sucesso")),
+                    "mensagem": resultado.get("mensagem", ""),
+                    "dry_run": resultado.get("dry_run")})
+
+
+# --------------------------------------------------------------------------
 # Rota de mudanca de modo SIMULADO <-> REAL (Parte 3)
 # --------------------------------------------------------------------------
 @app.route("/api/modo", methods=["POST"])

@@ -93,6 +93,20 @@ function alternarVazio(canvas, idMensagem, temDados) {
   el(idMensagem).hidden = temDados;
 }
 
+/** Simbolo clicavel: abre o grafico do token num novo separador.
+    DexScreener funciona para tudo; para pump.fun linka a propria pagina.
+    Sem mint (registos antigos do historico) -> devolve so o texto. */
+function linkToken(mint, simbolo, dex = "") {
+  const nome = simbolo || "?";
+  if (!mint) return nome;
+  const ePumpFun = (dex || "").toLowerCase().includes("pump");
+  const url = ePumpFun
+    ? `https://pump.fun/${mint}`
+    : `https://dexscreener.com/solana/${mint}`;
+  // rel="noopener": impede a pagina aberta de controlar o dashboard
+  return `<a class="link-token" href="${url}" target="_blank" rel="noopener">${nome} ↗</a>`;
+}
+
 // ==========================================================================
 // 2) Toast (mensagens rapidas) e modais (confirmacoes)
 // ==========================================================================
@@ -132,6 +146,34 @@ document.querySelectorAll("[data-fechar]").forEach((btn) => {
 // Tocar no fundo escurecido (fora do dialogo) tambem cancela
 el("modal-fundo").addEventListener("click", (evento) => {
   if (evento.target === el("modal-fundo")) fecharModais();
+});
+
+// --- Modal generico de acao de trading (comprar/vender) ---
+// Em modo REAL mostra tambem a caixa CONFIRMO (o backend exige a palavra).
+let _acaoPendente = null; // funcao a executar quando o utilizador confirmar
+
+function abrirModalAcao(titulo, texto, aoConfirmar) {
+  el("acao-titulo").textContent = titulo;
+  el("acao-texto").textContent = texto;
+  const emReal = estadoBot && !estadoBot.dry_run_env;
+  el("acao-aviso-real").hidden = !emReal;
+  el("acao-confirmo").hidden = !emReal;
+  el("acao-confirmo").value = "";
+  _acaoPendente = aoConfirmar;
+  abrirModal("modal-acao");
+}
+
+el("acao-confirmar").addEventListener("click", () => {
+  const emReal = estadoBot && !estadoBot.dry_run_env;
+  const palavra = el("acao-confirmo").value.trim();
+  if (emReal && palavra !== "CONFIRMO") {
+    toast("Escreve CONFIRMO para executar em modo REAL.", "erro");
+    return;
+  }
+  const acao = _acaoPendente;
+  _acaoPendente = null;
+  fecharModais();
+  if (acao) acao(emReal ? palavra : null);
 });
 
 // ==========================================================================
@@ -451,7 +493,7 @@ async function atualizarResumo() {
     return `<tr>
       <td>${dataHora(h.timestamp)}</td>
       <td><span class="tag ${eVenda ? "venda" : "compra"}">${eVenda ? "VENDA" : "COMPRA"}</span></td>
-      <td>${h.simbolo || "?"}</td>
+      <td>${linkToken(h.mint, h.simbolo)}</td>
       <td>${dinheiro(h.valor_usd)}</td>
       ${celulaLucro}
     </tr>`;
@@ -473,13 +515,53 @@ async function atualizarPosicoes() {
       celulaPL = `<td class="${classe}">${dinheiroComSinal(p.lucro_nao_realizado_usd)}</td>`;
     }
     return `<tr>
-      <td>${p.simbolo}</td>
+      <td>${linkToken(p.mint, p.simbolo, p.dex)}</td>
       <td>${dinheiro(p.valor_investido_usd)}</td>
       <td>$${p.preco_compra_usd.toPrecision(4)}</td>
       <td>${p.quantidade_tokens.toLocaleString("pt-PT", { maximumFractionDigits: 0 })}</td>
       <td>${tempoDecorrido(p.timestamp_compra)}</td>
       <td>${p.valor_atual_usd === null ? "N/A" : dinheiro(p.valor_atual_usd)}</td>
       ${celulaPL}
+      <td>
+        <button class="btn btn-mini btn-perigo" data-vender="50" data-mint="${p.mint}" data-simbolo="${p.simbolo}">50%</button>
+        <button class="btn btn-mini btn-perigo" data-vender="100" data-mint="${p.mint}" data-simbolo="${p.simbolo}">100%</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+/** Atualiza a watchlist: tokens fronteira a espera de decisao manual */
+async function atualizarWatchlist() {
+  const resposta = await fetch("/api/watchlist");
+  const dados = await resposta.json();
+  const lista = dados.watchlist;
+
+  el("vazio-watchlist").hidden = lista.length > 0;
+  el("tabela-watchlist").innerHTML = lista.map((w) => {
+    // Estado da reavaliacao periodica feita pelo bot
+    let estado = '<span class="estado-liq">por avaliar</span>';
+    if (w.reavaliacao) {
+      estado = w.reavaliacao.liquidez_viva
+        ? '<span class="estado-liq viva">● liquidez viva</span>'
+        : '<span class="estado-liq morta">● sem rota (rug?)</span>';
+    }
+    const conf = w.confianca === null || w.confianca === undefined ? "–" : w.confianca + "%";
+    const seguido = !!w.seguido;
+
+    return `<tr>
+      <td>${linkToken(w.mint, w.simbolo, w.dex)}</td>
+      <td><span class="pastilha ${w.score < 30 ? "score-baixo" : w.score <= 60 ? "score-medio" : "score-alto"}">${w.score}</span></td>
+      <td>${conf}</td>
+      <td>${dinheiro(w.liquidez_usd)}</td>
+      <td>${estado}</td>
+      <td>${tempoDecorrido(w.adicionado_em)}</td>
+      <td>
+        <button class="btn btn-mini ${seguido ? "btn-verde" : "btn-neutro"}"
+                data-seguir="${seguido ? "0" : "1"}" data-mint="${w.mint}">
+          ${seguido ? "★ A seguir" : "☆ Seguir"}
+        </button>
+        <button class="btn btn-mini btn-verde" data-comprar data-mint="${w.mint}" data-simbolo="${w.simbolo}">Comprar</button>
+      </td>
     </tr>`;
   }).join("");
 }
@@ -503,7 +585,7 @@ async function atualizarRadar() {
     const tagComprado = r.comprado ? ' <span class="tag comprado">COMPRADO</span>' : "";
 
     return `<tr>
-      <td>${r.simbolo || "?"}${tagComprado}</td>
+      <td>${linkToken(r.mint, r.simbolo, r.dex)}${tagComprado}</td>
       <td><span class="pastilha ${classeScore}">${r.score}</span></td>
       <td>${dinheiro(r.liquidez_usd)}</td>
       <td>${r.dex || "?"}</td>
@@ -511,6 +593,61 @@ async function atualizarRadar() {
     </tr>`;
   }).join("");
 }
+
+// ==========================================================================
+// Botoes de trading nas tabelas (delegacao de eventos)
+// ==========================================================================
+// As tabelas sao re-renderizadas a cada polling, o que destroi botoes e
+// os seus listeners. Solucao classica: UM listener no documento que
+// apanha cliques nos botoes pelos atributos data-* (delegacao).
+document.addEventListener("click", async (evento) => {
+  const btn = evento.target.closest("button[data-vender], button[data-comprar], button[data-seguir]");
+  if (!btn) return;
+  const mint = btn.dataset.mint;
+  const simbolo = btn.dataset.simbolo || "?";
+
+  // --- Vender 50% / 100% de uma posicao ---
+  if (btn.dataset.vender) {
+    const pct = btn.dataset.vender;
+    abrirModalAcao(
+      `Vender ${pct}% de ${simbolo}`,
+      `Vais vender ${pct}% da posição em ${simbolo} ao preço atual do mercado (via Jupiter).`,
+      async (confirmacao) => {
+        const corpo = { mint, percentagem: Number(pct) };
+        if (confirmacao) corpo.confirmacao = confirmacao;
+        const r = await pedirAcao("/api/vender", corpo);
+        toast(r.ok ? r.mensagem || "Venda executada." : r.erro || "Falha na venda.",
+              r.ok ? "sucesso" : "erro");
+        atualizarTudo();
+      }
+    );
+  }
+
+  // --- Comprar um token da watchlist ---
+  if (btn.hasAttribute("data-comprar")) {
+    abrirModalAcao(
+      `Comprar ${simbolo}`,
+      `Vais comprar o valor configurado (MAX_TRADE_USD) de ${simbolo}. O token sai da watchlist e passa a posição aberta.`,
+      async (confirmacao) => {
+        const corpo = { mint, simbolo };
+        if (confirmacao) corpo.confirmacao = confirmacao;
+        const r = await pedirAcao("/api/comprar", corpo);
+        toast(r.ok ? r.mensagem || "Compra executada." : r.erro || "Falha na compra.",
+              r.ok ? "sucesso" : "erro");
+        atualizarTudo();
+      }
+    );
+  }
+
+  // --- Seguir / deixar de seguir na watchlist (sem confirmacao: e inofensivo) ---
+  if (btn.dataset.seguir !== undefined) {
+    const r = await pedirAcao("/api/watchlist/seguir", {
+      mint, seguir: btn.dataset.seguir === "1",
+    });
+    if (!r.ok) toast(r.erro || "Não foi possível atualizar.", "erro");
+    atualizarWatchlist();
+  }
+});
 
 /** Um ciclo completo de atualizacao. try/catch para que uma falha de
     rede momentanea nao mate o polling - tenta outra vez no proximo ciclo */
@@ -521,6 +658,7 @@ async function atualizarTudo() {
     await Promise.all([
       atualizarResumo(),
       atualizarPosicoes(),
+      atualizarWatchlist(),
       atualizarRadar(),
       atualizarStatus(),
       atualizarLog(),

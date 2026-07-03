@@ -112,7 +112,7 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
     preco_compra_estimado = valor_usd / quantidade_tokens_estimada if quantidade_tokens_estimada else 0
 
     if config.DRY_RUN:
-        if not carteira.registar_compra(simbolo, valor_usd):
+        if not carteira.registar_compra(simbolo, valor_usd, mint=mint):
             return {
                 "sucesso": False, "dry_run": True,
                 "mensagem": f"[SIMULADO] Saldo virtual insuficiente para comprar {simbolo}",
@@ -164,7 +164,8 @@ def vender_token(mint: str, percentagem: float) -> dict:
             posicao["valor_investido_usd"] * (percentagem / 100.0)
         )
         carteira.registar_venda(
-            posicao["simbolo"], valor_recebido_usd, valor_investido_proporcional
+            posicao["simbolo"], valor_recebido_usd, valor_investido_proporcional,
+            mint=mint,
         )
         resultado = {
             "sucesso": True, "dry_run": True,

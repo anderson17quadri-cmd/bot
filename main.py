@@ -26,6 +26,7 @@ import ai_layer2
 import executor
 import posicoes
 import radar
+import watchlist
 
 
 def avaliar_com_ia(dados: dict) -> dict:
@@ -197,6 +198,45 @@ def verificar_posicoes() -> None:
                     alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
 
 
+def reavaliar_watchlist() -> None:
+    """Reavalia os tokens da watchlist: preco atual e se a liquidez ainda
+    esta viva (a cotacao Jupiter falhar = pool provavelmente morto/rugado).
+
+    Corre na mesma cadencia da verificacao de posicoes. Uma falha num
+    token nao impede a reavaliacao dos restantes.
+    """
+    registos = watchlist.carregar_watchlist()
+    if not registos:
+        return
+
+    try:
+        preco_sol = obter_preco_sol_usd()
+    except Exception:
+        return  # sem preco do SOL nao ha como converter; tenta no proximo ciclo
+
+    # 0.01 SOL e suficiente para obter uma cotacao representativa
+    LAMPORTS_TESTE = 10_000_000
+
+    for r in registos:
+        mint = r.get("mint")
+        if not mint:
+            continue
+        try:
+            cot = executor._obter_cotacao(config.MINT_SOL, mint, LAMPORTS_TESTE)
+            tokens_recebidos = float(cot.get("outAmount", 0))
+            if tokens_recebidos > 0:
+                # Preco por unidade minima do token (mesma convencao das posicoes)
+                valor_usd_teste = 0.01 * preco_sol
+                preco_unitario = valor_usd_teste / tokens_recebidos
+                watchlist.atualizar_reavaliacao(mint, preco_unitario, liquidez_viva=True)
+            else:
+                watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
+        except Exception:
+            # Jupiter nao cotou -> sem rota de troca -> liquidez morta/rugada
+            watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
+        time.sleep(0.3)  # pausa curta para nao martelar a API da Jupiter
+
+
 def processar_pool(pool: dict) -> None:
     """Trata um pool novo do inicio ao fim: analisar -> IA -> alerta -> compra."""
     dados = analyzer.analisar_onchain(pool)
@@ -207,12 +247,32 @@ def processar_pool(pool: dict) -> None:
     # Regista o token no radar (radar.json), comprado ou nao - e isto
     # que alimenta a seccao "Radar ao vivo" do dashboard. Se a posicao
     # existir agora nas posicoes abertas, e porque a compra aconteceu.
+    comprado = False
     try:
         comprado = dados["token_mint"] in posicoes.listar_posicoes_abertas()
         radar.registar_analise(dados, analise_ia, comprado)
     except Exception as e:
         # O radar e so informativo: uma falha aqui nunca para o bot
         alerts.info(f"[yellow]Nao consegui registar no radar:[/yellow] {e}")
+
+    # Token "fronteira": score acima do limiar de compra mas por pouco
+    # (ate SCORE_COMPRA_MAX + SCORE_WATCHLIST_MARGEM) e nao comprado ->
+    # entra na watchlist para o utilizador decidir manualmente no dashboard
+    try:
+        score = analise_ia["score_final"]
+        e_fronteira = (
+            config.SCORE_COMPRA_MAX
+            < score
+            <= config.SCORE_COMPRA_MAX + config.SCORE_WATCHLIST_MARGEM
+        )
+        if e_fronteira and not comprado:
+            watchlist.adicionar(dados, analise_ia)
+            alerts.info(
+                f"[cyan]{dados['token_simbolo']} (score {score}) entrou na "
+                f"watchlist - decisao manual no dashboard[/cyan]"
+            )
+    except Exception as e:
+        alerts.info(f"[yellow]Nao consegui atualizar a watchlist:[/yellow] {e}")
 
 
 def main() -> None:
@@ -263,7 +323,8 @@ def main() -> None:
                 time.sleep(config.PAUSA_ENTRE_TOKENS)
 
         # Verifica posicoes abertas periodicamente (independente de haver
-        # tokens novos), para o stop-loss/take-profit disparar a tempo
+        # tokens novos), para o stop-loss/take-profit disparar a tempo.
+        # A watchlist e reavaliada na mesma cadencia (preco + liquidez viva).
         agora = time.time()
         if config.fase2_configurada() and (
             agora - ultima_verificacao_posicoes >= config.INTERVALO_VERIFICAR_POSICOES
@@ -272,6 +333,10 @@ def main() -> None:
                 verificar_posicoes()
             except Exception as e:
                 alerts.info(f"[red]Erro a verificar posicoes:[/red] {e}")
+            try:
+                reavaliar_watchlist()
+            except Exception as e:
+                alerts.info(f"[red]Erro a reavaliar a watchlist:[/red] {e}")
             ultima_verificacao_posicoes = agora
 
         time.sleep(config.POLL_INTERVAL_SEGUNDOS)
