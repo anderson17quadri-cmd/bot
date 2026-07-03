@@ -39,6 +39,8 @@
       <g id="i-lista"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></g>
       <!-- olho / watchlist -->
       <g id="i-olho"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></g>
+      <!-- carteira -->
+      <g id="i-carteira"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M16 15h2"/></g>
       <!-- terminal / log -->
       <g id="i-terminal"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 9l4 3-4 3M12 15h6"/></g>
       <!-- caixa vazia (estados sem dados) -->
@@ -106,7 +108,30 @@
       <div class="cartao"><span class="rotulo">Win rate</span><span class="valor num" id="c-win-rate">–</span></div>
     </section>
 
-    <!-- ================= 2. LOG AO VIVO DO BOT ================= -->
+    <!-- ================= 2. CARTEIRA DO BOT (depositos) ================= -->
+    <!-- Endereco publico para enviares SOL de outra exchange/wallet.
+         A chave privada NUNCA aparece aqui - so o endereco. -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-carteira"/></svg> Carteira do bot</h2>
+      <div id="carteira-conteudo" class="carteira" hidden>
+        <!-- QR code (SVG gerado pelo servidor) para leres com outra wallet -->
+        <div class="qr-caixa" id="qr-wallet"></div>
+        <div class="carteira-info">
+          <span class="rotulo">Endereço para depósitos (SOL / rede Solana)</span>
+          <code class="endereco-wallet num" id="endereco-wallet">–</code>
+          <div class="carteira-acoes">
+            <button class="btn btn-pequeno btn-neutro" id="btn-copiar-endereco">Copiar endereço</button>
+            <span class="saldo-wallet">Saldo: <b class="num" id="saldo-wallet">–</b></span>
+          </div>
+        </div>
+      </div>
+      <div class="vazio" id="vazio-carteira" hidden>
+        <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-carteira"/></svg>
+        <p>Nenhuma wallet configurada ainda — define <code>WALLET_PRIVATE_KEY</code> no .env (usa sempre uma wallet nova, dedicada só ao bot).</p>
+      </div>
+    </section>
+
+    <!-- ================= 3. LOG AO VIVO DO BOT ================= -->
     <section class="painel">
       <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-terminal"/></svg> Log ao vivo</h2>
       <pre id="log-bot" class="log-caixa">O log aparece aqui quando o bot arrancar…</pre>
@@ -231,6 +256,8 @@
               <th>Tipo</th>
               <th>Símbolo</th>
               <th>Valor</th>
+              <th>P. compra</th>
+              <th>P. venda</th>
               <th>Lucro</th>
             </tr>
           </thead>

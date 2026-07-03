@@ -40,6 +40,13 @@ function dinheiroComSinal(valor) {
   return (valor >= 0 ? "+" : "-") + dinheiro(Math.abs(valor));
 }
 
+/** Preco unitario de tokens (numeros minusculos tipo 4.2e-9):
+    mostra 4 algarismos significativos, ou "–" se nao houver dado */
+function precoUnitario(valor) {
+  if (valor === null || valor === undefined) return "–";
+  return "$" + Number(valor).toPrecision(4);
+}
+
 /** Formata uma percentagem com sinal: +1,15% / -3,20% */
 function percentagemComSinal(valor) {
   const texto = Math.abs(valor).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -419,6 +426,45 @@ async function atualizarStatus() {
   }
 }
 
+/** Atualiza a seccao "Carteira do bot": endereco, saldo SOL e QR code.
+    O QR e um SVG gerado pelo servidor (so o endereco publico, nunca a
+    chave privada). So re-renderiza o QR quando o endereco muda. */
+async function atualizarCarteira() {
+  const resposta = await fetch("/api/wallet");
+  const dados = await resposta.json();
+
+  el("carteira-conteudo").hidden = !dados.configurada;
+  el("vazio-carteira").hidden = dados.configurada;
+  if (!dados.configurada) return;
+
+  // Endereco + QR so mudam se a wallet mudar (evita flicker a cada polling)
+  if (el("endereco-wallet").textContent !== dados.endereco) {
+    el("endereco-wallet").textContent = dados.endereco;
+    el("qr-wallet").innerHTML = dados.qr_svg || "";
+  }
+  el("saldo-wallet").textContent =
+    dados.saldo_sol === null ? "N/A" : dados.saldo_sol.toFixed(4) + " SOL";
+}
+
+// Botao "Copiar endereco": usa a API moderna do clipboard, com fallback
+// (textarea + execCommand) para browsers/webviews mais antigos
+el("btn-copiar-endereco").addEventListener("click", async () => {
+  const endereco = el("endereco-wallet").textContent;
+  if (!endereco || endereco === "–") return;
+  try {
+    await navigator.clipboard.writeText(endereco);
+    toast("Endereço copiado!", "sucesso");
+  } catch {
+    const caixa = document.createElement("textarea");
+    caixa.value = endereco;
+    document.body.appendChild(caixa);
+    caixa.select();
+    document.execCommand("copy");
+    caixa.remove();
+    toast("Endereço copiado!", "sucesso");
+  }
+});
+
 /** Atualiza a caixa "Log ao vivo" com as ultimas linhas do bot.log */
 async function atualizarLog() {
   const resposta = await fetch("/api/bot/log");
@@ -490,11 +536,17 @@ async function atualizarResumo() {
       const classe = h.lucro_usd >= 0 ? "positivo" : "negativo";
       celulaLucro = `<td class="${classe}">${dinheiroComSinal(h.lucro_usd)}</td>`;
     }
+    // Precos unitarios: nas compras so ha preco de compra; nas vendas
+    // ha os dois (registos antigos sem estes campos mostram "–")
+    const precoCompra = eVenda ? h.preco_compra_usd : h.preco_unitario_usd;
+
     return `<tr>
       <td>${dataHora(h.timestamp)}</td>
       <td><span class="tag ${eVenda ? "venda" : "compra"}">${eVenda ? "VENDA" : "COMPRA"}</span></td>
       <td>${linkToken(h.mint, h.simbolo)}</td>
       <td>${dinheiro(h.valor_usd)}</td>
+      <td>${precoUnitario(precoCompra)}</td>
+      <td>${eVenda ? precoUnitario(h.preco_venda_usd) : "–"}</td>
       ${celulaLucro}
     </tr>`;
   }).join("");
@@ -662,6 +714,7 @@ async function atualizarTudo() {
       atualizarRadar(),
       atualizarStatus(),
       atualizarLog(),
+      atualizarCarteira(),
     ]);
     el("ultima-atualizacao").textContent =
       "Atualizado às " + new Date().toLocaleTimeString("pt-PT");

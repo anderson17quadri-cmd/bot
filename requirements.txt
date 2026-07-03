@@ -13,3 +13,4 @@ rich>=13.7            # imprimir alertas bonitos e legiveis na consola
 # Dashboard web local (dashboard.py) - tambem pure-Python
 # ============================================================
 flask>=3.0            # servidor web do dashboard (localhost:5000)
+qrcode>=7.4           # QR code do endereco da wallet (pure-Python, SVG sem pillow)

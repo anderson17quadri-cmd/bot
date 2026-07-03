@@ -432,6 +432,53 @@ tr:last-child td { border-bottom: none; }
 .pastilha.score-medio { background: rgba(250, 178, 25, 0.14); color: var(--amarelo); }
 .pastilha.score-alto  { background: rgba(255, 92, 122, 0.14); color: var(--vermelho); }
 
+/* ==========================================================================
+   CARTEIRA DO BOT (endereco para depositos + QR)
+   ========================================================================== */
+.carteira {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;   /* no telemovel o QR pode passar para cima do texto */
+}
+/* O QR precisa de fundo claro para as apps de camara o lerem bem */
+.qr-caixa {
+  background: #ffffff;
+  border-radius: 10px;
+  padding: 8px;
+  width: 132px;
+  height: 132px;
+  flex-shrink: 0;
+}
+.qr-caixa svg { width: 100%; height: 100%; display: block; }
+
+.carteira-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;      /* deixa o endereco encolher dentro do flex */
+  flex: 1;
+}
+.carteira-info .rotulo {
+  color: var(--texto-mudo);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+}
+.endereco-wallet {
+  font-size: 0.78rem;
+  color: var(--texto-suave);
+  background: #0a0d12;
+  border: 1px solid var(--linha-grelha);
+  border-radius: 8px;
+  padding: 8px 10px;
+  word-break: break-all;   /* endereco de 44 chars quebra em vez de estourar */
+}
+.carteira-acoes { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.saldo-wallet { color: var(--texto-suave); font-size: 0.85rem; }
+.saldo-wallet b { color: var(--verde); }
+
 /* Simbolo clicavel: abre o grafico do token (DexScreener/pump.fun) */
 .link-token {
   color: var(--texto);

@@ -59,12 +59,17 @@ def saldo_disponivel() -> float:
     return _carregar()["saldo_atual_usd"]
 
 
-def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None) -> bool:
+def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
+                    preco_unitario_usd: float | None = None,
+                    quantidade_tokens: float | None = None) -> bool:
     """Debita o valor da compra do saldo virtual. Devolve False (e nao
     debita nada) se nao houver saldo suficiente.
 
-    'mint' e opcional (registos antigos nao o tem): serve para o
-    dashboard poder abrir o grafico do token (DexScreener) no historico."""
+    Os campos extra sao opcionais (registos antigos nao os tem):
+      mint               -> para o dashboard abrir o grafico do token
+      preco_unitario_usd -> preco pago por unidade minima do token
+      quantidade_tokens  -> quantas unidades minimas foram compradas
+    Assim o historico fica completo mesmo depois de a posicao fechar."""
     dados = _carregar()
     if dados["saldo_atual_usd"] < valor_usd:
         return False
@@ -73,6 +78,8 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None) -> 
     dados["historico"].append({
         "tipo": "compra", "simbolo": simbolo, "valor_usd": valor_usd,
         "mint": mint,
+        "preco_unitario_usd": preco_unitario_usd,
+        "quantidade_tokens": quantidade_tokens,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     _guardar(dados)
@@ -80,9 +87,17 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None) -> 
 
 
 def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd: float,
-                   mint: str | None = None) -> None:
+                   mint: str | None = None,
+                   preco_compra_usd: float | None = None,
+                   preco_venda_usd: float | None = None,
+                   quantidade_tokens: float | None = None) -> None:
     """Credita o valor recebido da venda no saldo virtual e regista o
-    lucro/prejuizo realizado dessa operacao."""
+    lucro/prejuizo realizado dessa operacao.
+
+    Os campos extra (opcionais) preservam o que a posicao sabia ANTES
+    de ser apagada pelo fechar_posicao(): o mint, o preco a que se
+    comprou, o preco a que se vendeu e a quantidade vendida - sem isto,
+    fechada a posicao, esses dados perdiam-se para sempre."""
     dados = _carregar()
     lucro = valor_recebido_usd - valor_investido_usd
     dados["saldo_atual_usd"] += valor_recebido_usd
@@ -90,6 +105,9 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
         "tipo": "venda", "simbolo": simbolo,
         "valor_usd": valor_recebido_usd, "lucro_usd": round(lucro, 4),
         "mint": mint,
+        "preco_compra_usd": preco_compra_usd,
+        "preco_venda_usd": preco_venda_usd,
+        "quantidade_tokens": quantidade_tokens,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     _guardar(dados)

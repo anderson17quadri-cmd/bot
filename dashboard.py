@@ -609,6 +609,73 @@ def api_vender():
 
 
 # --------------------------------------------------------------------------
+# Carteira do bot (endereco para depositos + saldo SOL + QR code)
+# --------------------------------------------------------------------------
+# Cache: o endereco nunca muda e o saldo nao precisa de refrescar a cada
+# polling de 4s - guardamos o resultado durante CACHE_WALLET_SEGUNDOS.
+_cache_wallet = {"quando": 0.0, "resposta": None}
+CACHE_WALLET_SEGUNDOS = 30
+
+
+def _gerar_qr_svg(texto: str) -> str | None:
+    """Gera um QR code do endereco em SVG (texto), server-side.
+
+    Usa a biblioteca 'qrcode' que e pure-Python (zero compilacao, ideal
+    para Termux) e nem precisa do pillow no modo SVG. Se a biblioteca
+    nao estiver instalada, devolve None e o dashboard mostra so o texto."""
+    try:
+        import io
+        import qrcode
+        import qrcode.image.svg
+        imagem = qrcode.make(texto, image_factory=qrcode.image.svg.SvgPathImage)
+        buffer = io.BytesIO()
+        imagem.save(buffer)
+        return buffer.getvalue().decode("utf-8")
+    except Exception:
+        return None
+
+
+@app.route("/api/wallet")
+def api_wallet():
+    """Endereco publico da wallet do bot (para enviares SOL de outra
+    exchange/wallet) + saldo atual em SOL + QR code do endereco.
+
+    A CHAVE PRIVADA NUNCA sai daqui - so o endereco publico.
+    Sem WALLET_PRIVATE_KEY no .env -> {"configurada": false}."""
+    if not config.fase2_configurada():
+        return jsonify({"configurada": False})
+
+    # Cache de 30s (o endereco e fixo; o saldo nao muda a cada 4s)
+    agora = time.time()
+    if _cache_wallet["resposta"] and (agora - _cache_wallet["quando"]) < CACHE_WALLET_SEGUNDOS:
+        return jsonify(_cache_wallet["resposta"])
+
+    # Import lazy: o wallet.py puxa o solders (biblioteca nativa); so o
+    # carregamos quando esta rota e mesmo usada, como nas rotas de trading
+    try:
+        import wallet
+        endereco = wallet.endereco_publico()
+    except Exception as e:
+        # Chave invalida ou solders em falta -> estado vazio com explicacao
+        return jsonify({"configurada": False, "erro": str(e)})
+
+    try:
+        saldo_sol = wallet.obter_saldo_sol()
+    except Exception:
+        saldo_sol = None  # RPC falhou; mostra "N/A" e tenta no proximo ciclo
+
+    resposta = {
+        "configurada": True,
+        "endereco": endereco,
+        "saldo_sol": saldo_sol,
+        "qr_svg": _gerar_qr_svg(endereco),
+    }
+    _cache_wallet["quando"] = agora
+    _cache_wallet["resposta"] = resposta
+    return jsonify(resposta)
+
+
+# --------------------------------------------------------------------------
 # Rota de mudanca de modo SIMULADO <-> REAL (Parte 3)
 # --------------------------------------------------------------------------
 @app.route("/api/modo", methods=["POST"])
