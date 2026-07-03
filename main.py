@@ -27,6 +27,7 @@ import executor
 import posicoes
 import radar
 import watchlist
+import cooldown
 
 
 def avaliar_com_ia(dados: dict) -> dict:
@@ -486,13 +487,39 @@ def processar_pool(pool: dict) -> None:
     analyzer.py (mint/freeze/holders via RPC); BSC usa o analyzer_bsc.py
     (honeypot/taxas via Honeypot.is). A partir daqui o fluxo e o mesmo -
     a IA, o alerta, o radar e a watchlist trabalham sobre o dict 'dados'.
+
+    COOLDOWN DE REANALISE: o detector.py so evita repetir o mesmo POOL
+    (pool_address) - mas o mesmo TOKEN pode aparecer com pools diferentes
+    em pouco tempo (ex: migracao da bonding curve do pump.fun para um
+    pool normal). Por isso, antes de gastar uma analise completa (e uma
+    chamada a IA), verificamos se este mint ja foi analisado ha menos de
+    COOLDOWN_REANALISE_MINUTOS. Excecao: se ja for uma posicao aberta,
+    o cooldown NAO se aplica aqui (isso nunca bloqueia o
+    verificar_posicoes(), que corre num ciclo totalmente separado).
     """
+    mint_bruto = pool.get("token_mint")
+    ja_e_posicao_aberta = bool(mint_bruto) and mint_bruto in posicoes.listar_posicoes_abertas()
+    if mint_bruto and not ja_e_posicao_aberta and cooldown.foi_analisado_recentemente(mint_bruto):
+        alerts.info(
+            f"[dim]{pool.get('token_simbolo', '?')} ja foi analisado ha menos de "
+            f"{config.COOLDOWN_REANALISE_MINUTOS} min - a ignorar (evita gastar IA outra vez)[/dim]"
+        )
+        return
+
     chain = pool.get("chain", "solana")
     if chain == "bsc":
         import analyzer_bsc
         dados = analyzer_bsc.analisar(pool)
     else:
         dados = analyzer.analisar_onchain(pool)
+
+    # Marca este mint como "analisado agora" - so depois de decidirmos
+    # mesmo prosseguir com a analise (nao antes do cooldown-check acima)
+    if mint_bruto:
+        try:
+            cooldown.registar_analise(mint_bruto)
+        except Exception as e:
+            alerts.info(f"[yellow]Nao consegui registar o cooldown:[/yellow] {e}")
 
     # MODO SNIPER RAPIDO: corre AQUI, logo apos a analise on-chain e ANTES
     # da chamada a IA (mais lenta) - e literalmente o ponto do modo:

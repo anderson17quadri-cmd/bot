@@ -23,6 +23,7 @@ posicoes.json
 radar.json
 watchlist.json
 sniper_rapido.json
+vistos_recentemente.json
 bot.pid
 wallet.py.*
 gerar_wallet.py

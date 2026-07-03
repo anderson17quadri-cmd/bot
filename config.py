@@ -60,12 +60,27 @@ ANTHROPIC_MODEL = _env_texto("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 # ==========================================================================
 # 4) Comportamento do bot
 # ==========================================================================
+# NOTA sobre baixar isto muito (ex: 10-15s): a GeckoTerminal tem o seu
+# proprio ritmo de atualizacao da lista "new_pools", que nao e garantido
+# ser mais rapido do que isso - pedir com mais frequencia nao traz
+# necessariamente tokens genuinamente mais novos, so aumenta a chance de
+# reencontrares o MESMO token por vias diferentes (ver cooldown.py: um
+# token pode aparecer com pool_address diferente quando migra de
+# bonding curve para um pool normal, por exemplo). O cooldown de
+# reanalise (COOLDOWN_REANALISE_MINUTOS) evita o desperdicio de chamadas
+# a IA nesses casos, mas nao faz a GeckoTerminal ir mais depressa.
 POLL_INTERVAL_SEGUNDOS = _env_int("POLL_INTERVAL_SEGUNDOS", 30)
 ZONA_AMBIGUA_MIN = _env_int("ZONA_AMBIGUA_MIN", 40)
 ZONA_AMBIGUA_MAX = _env_int("ZONA_AMBIGUA_MAX", 70)
 LIQUIDEZ_MINIMA_USD = _env_float("LIQUIDEZ_MINIMA_USD", 2000.0)
 MAX_ANALISES_POR_CICLO = _env_int("MAX_ANALISES_POR_CICLO", 5)
 PAUSA_ENTRE_TOKENS = _env_float("PAUSA_ENTRE_TOKENS", 1.0)
+# Um mint ja analisado (heuristico + IA) nao volta a ser processado
+# dentro desta janela, mesmo que a GeckoTerminal o devolva de novo com
+# um pool_address diferente (ex: migracao de bonding curve). NAO se
+# aplica a posicoes ja abertas - essas sao verificadas pelo seu proprio
+# ciclo (verificar_posicoes), independente disto.
+COOLDOWN_REANALISE_MINUTOS = _env_int("COOLDOWN_REANALISE_MINUTOS", 10)
 
 # --- Multi-chain (Parte B) ---------------------------------------------
 # REDE fica como a rede "principal"/legada (Solana) para o codigo antigo
