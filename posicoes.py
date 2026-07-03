@@ -37,7 +37,14 @@ def abrir_posicao(
     preco_compra_usd: float,
     quantidade_tokens: float,
     dry_run: bool,
+    decimais: int | None = None,
 ) -> dict:
+    # 'decimais' e opcional (posicoes antigas nao o tem): serve so para o
+    # dashboard poder converter o preco por UNIDADE MINIMA (raw, que e
+    # como preco_compra_usd/quantidade_tokens sao guardados internamente)
+    # no preco por TOKEN INTEIRO que um humano reconhece (ex: BONK tem 5
+    # decimais -> preco_por_token = preco_raw * 10^5). A matematica do
+    # stop-loss NAO usa isto - trabalha sempre em raw, por racios.
     posicoes = carregar_posicoes()
     posicao = {
         "mint": mint,
@@ -45,6 +52,7 @@ def abrir_posicao(
         "valor_investido_usd": valor_investido_usd,
         "preco_compra_usd": preco_compra_usd,
         "quantidade_tokens": quantidade_tokens,
+        "decimais": decimais,
         "pico_preco_usd": preco_compra_usd,
         "take_profit_disparado": False,
         "timestamp_compra": datetime.now(timezone.utc).isoformat(),

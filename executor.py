@@ -90,11 +90,14 @@ def _executar_swap_real(cotacao: dict) -> str:
     return resultado["result"]  # assinatura da transacao
 
 
-def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float) -> dict:
+def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float,
+                  decimais: int | None = None) -> dict:
     """Compra 'valor_usd' dolares do token 'mint', pagando em SOL.
 
     'preco_sol_usd' e o preco atual do SOL em USD, usado so para converter
     o valor_usd em lamports de SOL a pedir na cotacao.
+    'decimais' (opcional) e so para o dashboard mostrar o preco por token
+    inteiro - se vier None, o dashboard cai para um lookup proprio.
 
     Devolve um dict com o resultado (sucesso, dry_run, detalhes).
     """
@@ -125,6 +128,7 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
             mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
             preco_compra_usd=preco_compra_estimado,
             quantidade_tokens=quantidade_tokens_estimada, dry_run=True,
+            decimais=decimais,
         )
         return {
             "sucesso": True, "dry_run": True,
@@ -138,6 +142,7 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
         mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
         preco_compra_usd=preco_compra_estimado,
         quantidade_tokens=quantidade_tokens_estimada, dry_run=False,
+        decimais=decimais,
     )
     return {
         "sucesso": True, "dry_run": False, "assinatura": assinatura,

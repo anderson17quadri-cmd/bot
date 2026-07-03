@@ -245,11 +245,22 @@ PUMPFUN_PERMITIR_ENVIO_REAL = _env_texto("PUMPFUN_PERMITIR_ENVIO_REAL", "false")
 # modo ficar ligado durante um dia mau.
 SNIPER_RAPIDO_ATIVO = _env_texto("SNIPER_RAPIDO_ATIVO", "false").lower() in ("1", "true", "yes", "sim")
 SNIPER_RAPIDO_VALOR_USD = _env_float("SNIPER_RAPIDO_VALOR_USD", 1.0)       # compra minuscula, so este modo
-SNIPER_RAPIDO_SCORE_MAX = _env_int("SNIPER_RAPIDO_SCORE_MAX", 50)         # so heuristico, sem IA
 SNIPER_RAPIDO_LIMITE_DIARIO_USD = _env_float("SNIPER_RAPIDO_LIMITE_DIARIO_USD", 10.0)
 # Se a DeepSeek (depois de a posicao ja estar comprada) devolver um score
 # acima disto, vende-se imediatamente - protecao a posteriori
 SNIPER_RAPIDO_SCORE_VENDA_URGENTE = _env_int("SNIPER_RAPIDO_SCORE_VENDA_URGENTE", 70)
+
+# --- Checklist BINARIO do modo caveira (substitui o score heuristico) ---
+# Este modo deixou de somar pesos (score). Agora e uma checklist sim/nao,
+# mais rapida de avaliar e mais previsivel. Compra SS E SO SS TODAS estas
+# forem verdadeiras: (1) mint authority revogada, (2) freeze authority
+# revogada, (3) liquidez >= LIQUIDEZ_MINIMA_CAVEIRA_USD, (4) idade do
+# token <= IDADE_MAXIMA_CAVEIRA_SEGUNDOS. Qualquer uma que falhe -> nao
+# compra neste modo (mas o modo normal, em paralelo, avalia na mesma).
+# A liquidez minima do caveira pode ser MAIS BAIXA que a do modo normal
+# (aceita-se mais risco em troca de entrar cedo).
+LIQUIDEZ_MINIMA_CAVEIRA_USD = _env_float("LIQUIDEZ_MINIMA_CAVEIRA_USD", 1000.0)
+IDADE_MAXIMA_CAVEIRA_SEGUNDOS = _env_int("IDADE_MAXIMA_CAVEIRA_SEGUNDOS", 60)
 
 
 def fase2_configurada() -> bool:

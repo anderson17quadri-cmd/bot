@@ -924,7 +924,7 @@ async function atualizarPosicoes() {
     return `<tr>
       <td>${linkToken(p.mint, p.simbolo, p.dex, p.chain)}${tagChain(p.chain)}${tagCurva}${tagSniper}${tagManual}</td>
       <td>${dinheiro(p.valor_investido_usd)}</td>
-      <td>${precoUnitario(p.preco_compra_usd)}</td>
+      <td>${precoUnitario(p.preco_compra_por_token_usd ?? p.preco_compra_usd)}</td>
       <td><span title="${qtdExata}">${abreviarQuantidade(p.quantidade_tokens)}</span></td>
       <td>${tempoDecorrido(p.timestamp_compra)}</td>
       <td class="${classeFlashValor}">${p.valor_atual_usd === null ? "N/A" : dinheiro(p.valor_atual_usd)}</td>

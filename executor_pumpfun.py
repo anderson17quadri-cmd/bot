@@ -303,6 +303,7 @@ def comprar_na_curva(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: f
         posicoes.abrir_posicao(
             mint=mint, simbolo=simbolo, valor_investido_usd=teto,
             preco_compra_usd=preco_unit_usd, quantidade_tokens=tokens, dry_run=True,
+            decimais=6,  # tokens do pump.fun sao sempre de 6 decimais
         )
         # Marca a posicao como sendo de bonding curve (tag no dashboard)
         posicoes.atualizar_posicao(mint, origem="bonding_curve")
@@ -383,7 +384,7 @@ def _comprar_real(mint_str, simbolo, valor_usd, valor_sol, tokens_esperados,
         import posicoes
         posicoes.abrir_posicao(mint=mint_str, simbolo=simbolo, valor_investido_usd=valor_usd,
                                preco_compra_usd=preco_unit_usd, quantidade_tokens=tokens_esperados,
-                               dry_run=False)
+                               dry_run=False, decimais=6)  # pump.fun = 6 decimais
         posicoes.atualizar_posicao(mint_str, origem="bonding_curve")
         return {"sucesso": True, "dry_run": False, "origem": "bonding_curve",
                 "assinatura": assinatura,

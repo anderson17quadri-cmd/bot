@@ -147,17 +147,49 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
     return True  # tratado pelo caminho da curva, nao cai no fluxo normal
 
 
+def _passa_checklist_caveira(dados: dict) -> tuple[bool, str]:
+    """Checklist BINARIO do modo caveira - substitui o score heuristico
+    neste modo. Devolve (passou, motivo). Compra SS E SO SS TODAS estas
+    forem verdadeiras (sem pontuacao, so sim/nao):
+
+      1. Mint authority revogada (None)
+      2. Freeze authority revogada (None)
+      3. Liquidez >= LIQUIDEZ_MINIMA_CAVEIRA_USD
+      4. Idade do token <= IDADE_MAXIMA_CAVEIRA_SEGUNDOS
+
+    Se qualquer uma falhar -> nao compra neste modo (o motivo diz qual).
+    Nota: se os dados on-chain nao estiverem disponiveis (ex: RPC falhou),
+    NAO conseguimos garantir 1) e 2), por isso reprovamos por seguranca -
+    este modo so entra quando tem a certeza que as autoridades estao ok.
+    """
+    if not dados.get("onchain_disponivel"):
+        return False, "dados on-chain indisponiveis (nao da para confirmar autoridades)"
+    if dados.get("mint_authority") is not None:
+        return False, "mint authority ATIVA (podem imprimir mais tokens)"
+    if dados.get("freeze_authority") is not None:
+        return False, "freeze authority ATIVA (podem congelar carteiras)"
+    if dados.get("liquidez_usd", 0) < config.LIQUIDEZ_MINIMA_CAVEIRA_USD:
+        return False, (f"liquidez ${dados.get('liquidez_usd', 0):,.0f} < minimo caveira "
+                       f"${config.LIQUIDEZ_MINIMA_CAVEIRA_USD:,.0f}")
+    idade_seg = dados.get("idade_minutos", 999) * 60
+    if idade_seg > config.IDADE_MAXIMA_CAVEIRA_SEGUNDOS:
+        return False, (f"idade {idade_seg:.0f}s > maximo caveira "
+                       f"{config.IDADE_MAXIMA_CAVEIRA_SEGUNDOS}s (ja nao e recente o suficiente)")
+    return True, "todas as 4 condicoes verdadeiras"
+
+
 def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     """MODO SNIPER RAPIDO ("modo caveira") - o mais arriscado dos 3 modos
     de compra do bot. Le config.py 7c) para o contexto completo.
 
     ISOLAMENTO DELIBERADO: esta funcao NUNCA olha para SCORE_COMPRA_MAX,
     MAX_TRADE_USD nem para analise_ia (a IA ainda nao correu quando isto
-    e chamado) - usa SO os seus proprios limiares (SNIPER_RAPIDO_*) e o
-    'score_heuristico' que o analyzer.py ja calculou so com verificacoes
-    on-chain instantaneas (mint/freeze authority, liquidez minima). E
-    chamada ANTES de avaliar_com_ia() no processar_pool, exatamente para
-    comprar antes da IA (mais lenta) terminar.
+    e chamado). Desde a simplificacao, tambem JA NAO usa o score
+    heuristico - usa uma CHECKLIST BINARIA (ver _passa_checklist_caveira)
+    diretamente sobre os dados on-chain rapidos (autoridades, liquidez,
+    idade), mais previsivel e rapida de avaliar. E chamada ANTES de
+    avaliar_com_ia() no processar_pool, exatamente para comprar antes da
+    IA (mais lenta) terminar.
 
     So Solana por agora (o mesmo mint tem de ser negociavel via Jupiter
     de imediato - a BSC e a bonding curve do pump.fun tem os seus
@@ -173,12 +205,15 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     if not config.fase2_configurada():
         return False  # sem wallet, sem trading
 
-    score = dados["score_heuristico"]  # SO heuristico - nunca a IA
-    if score > config.SNIPER_RAPIDO_SCORE_MAX:
-        return False
-
     mint = dados["token_mint"]
     simbolo = dados["token_simbolo"]
+
+    # Checklist binaria (substitui o score heuristico neste modo)
+    passou, motivo = _passa_checklist_caveira(dados)
+    if not passou:
+        alerts.info(f"[dim][💀 sniper] {simbolo} reprovado na checklist: {motivo}[/dim]")
+        return False
+
     if mint in posicoes.listar_posicoes_abertas():
         return False  # ja ha posicao neste token (de qualquer modo)
 
@@ -201,7 +236,8 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     try:
         preco_sol_usd = obter_preco_sol_usd()
         r = executor.comprar_token(mint=mint, simbolo=simbolo,
-                                   valor_usd=valor, preco_sol_usd=preco_sol_usd)
+                                   valor_usd=valor, preco_sol_usd=preco_sol_usd,
+                                   decimais=dados.get("decimais"))
         if r.get("sucesso"):
             posicoes.atualizar_posicao(mint, sniper_rapido=True)
             if config.DRY_RUN:
@@ -210,7 +246,7 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
             sniper_rapido.registar_gasto(valor)
             alerts.info(
                 f"[bold magenta]💀 [SNIPER RAPIDO] {r['mensagem']} "
-                f"(score heuristico {score}, SEM esperar pela IA)[/bold magenta]"
+                f"(passou a checklist binaria, SEM esperar pela IA)[/bold magenta]"
             )
             return True
         alerts.info(f"[yellow]💀 [sniper] falha ao comprar {simbolo}: {r.get('mensagem')}[/yellow]")
@@ -323,6 +359,7 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
         resultado = executor.comprar_token(
             mint=mint, simbolo=simbolo,
             valor_usd=config.MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
+            decimais=dados.get("decimais"),
         )
         etiqueta = "[SIMULADO]" if resultado["dry_run"] else "[REAL]"
         alerts.info(f"[green]{etiqueta} COMPRA: {resultado['mensagem']}[/green]")

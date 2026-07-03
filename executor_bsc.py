@@ -150,7 +150,8 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float) -> dict:
                     "mensagem": f"[SIMULADO][BSC] Saldo virtual insuficiente para {simbolo}"}
         posicoes.abrir_posicao(mint=mint, simbolo=simbolo, valor_investido_usd=teto,
                                preco_compra_usd=preco_unit_usd,
-                               quantidade_tokens=tokens_estimados, dry_run=True)
+                               quantidade_tokens=tokens_estimados, dry_run=True,
+                               decimais=18)  # tokens BSC/ERC-20 sao tipicamente 18 decimais
         posicoes.atualizar_posicao(mint, chain="bsc")
         return {"sucesso": True, "dry_run": True, "chain": "bsc",
                 "quantidade_tokens": tokens_estimados,
@@ -215,7 +216,8 @@ def _comprar_real(mint, simbolo, valor_usd, amount_in_wei, tokens_estimados, pre
         import posicoes
         posicoes.abrir_posicao(mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
                                preco_compra_usd=preco_unit_usd,
-                               quantidade_tokens=tokens_estimados, dry_run=False)
+                               quantidade_tokens=tokens_estimados, dry_run=False,
+                               decimais=18)  # BSC/ERC-20 = 18 decimais
         posicoes.atualizar_posicao(mint, chain="bsc")
         return {"sucesso": True, "dry_run": False, "chain": "bsc", "assinatura": tx_hash,
                 "mensagem": f"[BSC] Comprado ${valor_usd:.2f} de {simbolo} - tx {tx_hash[:12]}..."}

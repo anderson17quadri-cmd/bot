@@ -349,6 +349,38 @@ def api_resumo():
     })
 
 
+# Cache de decimais por mint (nunca mudam) - evita repetir a chamada RPC
+# para posicoes antigas/manuais que nao guardaram os decimais na compra.
+_cache_decimais: dict = {}
+
+
+def _obter_decimais(mint: str, chain: str) -> int | None:
+    """Descobre os decimais de um token (para converter o preco por
+    unidade minima em preco por token inteiro no dashboard). So usado
+    como FALLBACK quando a posicao nao guardou os decimais. Resultado
+    fica em cache permanente - decimais nunca mudam. None se falhar."""
+    if mint in _cache_decimais:
+        return _cache_decimais[mint]
+
+    valor = None
+    try:
+        if chain == "bsc":
+            valor = 18  # padrao ERC-20 - evita uma chamada extra a BSC
+        else:
+            # Solana: getAccountInfo jsonParsed devolve os decimais do mint
+            resp = requests.post(config.SOLANA_RPC_URL, json={
+                "jsonrpc": "2.0", "id": 1, "method": "getAccountInfo",
+                "params": [mint, {"encoding": "jsonParsed"}],
+            }, timeout=8)
+            info = resp.json().get("result", {}).get("value", {})
+            valor = info.get("data", {}).get("parsed", {}).get("info", {}).get("decimals")
+    except Exception:
+        valor = None
+
+    _cache_decimais[mint] = valor
+    return valor
+
+
 @app.route("/api/posicoes")
 def api_posicoes():
     """Devolve as posicoes abertas com o valor atual estimado (Jupiter).
@@ -359,6 +391,7 @@ def api_posicoes():
     for mint, p in posicoes.items():
         quantidade = p.get("quantidade_tokens", 0.0)
         investido = p.get("valor_investido_usd", 0.0)
+        preco_compra_raw = p.get("preco_compra_usd", 0.0)
 
         valor_atual = _valor_atual_usd(mint, quantidade) if quantidade else None
 
@@ -367,11 +400,24 @@ def api_posicoes():
             round(valor_atual - investido, 2) if valor_atual is not None else None
         )
 
+        # Preco por TOKEN INTEIRO (o que um humano reconhece) = preco por
+        # unidade minima * 10^decimais. Os decimais vem da posicao (compras
+        # novas) ou de um lookup com cache (posicoes antigas/manuais).
+        decimais = p.get("decimais")
+        if decimais is None:
+            decimais = _obter_decimais(mint, p.get("chain", "solana"))
+        preco_compra_por_token = (
+            preco_compra_raw * (10 ** decimais) if decimais is not None else None
+        )
+
         lista.append({
             "mint": mint,
             "simbolo": p.get("simbolo", "?"),
             "valor_investido_usd": investido,
-            "preco_compra_usd": p.get("preco_compra_usd", 0.0),
+            "preco_compra_usd": preco_compra_raw,
+            # Preco por token inteiro (para mostrar no dashboard). Se nao
+            # soubermos os decimais, fica None e o frontend cai para o raw.
+            "preco_compra_por_token_usd": preco_compra_por_token,
             "quantidade_tokens": quantidade,
             "timestamp_compra": p.get("timestamp_compra"),
             "dry_run": p.get("dry_run", True),
@@ -855,7 +901,9 @@ def api_sniper():
     return jsonify({
         "ativo": _ler_bool_do_env("SNIPER_RAPIDO_ATIVO", False),
         "valor_usd": config.SNIPER_RAPIDO_VALOR_USD,
-        "score_max": config.SNIPER_RAPIDO_SCORE_MAX,
+        # Criterios da checklist binaria (substituiram o score heuristico)
+        "liquidez_minima_usd": config.LIQUIDEZ_MINIMA_CAVEIRA_USD,
+        "idade_maxima_seg": config.IDADE_MAXIMA_CAVEIRA_SEGUNDOS,
         "limite_diario_usd": config.SNIPER_RAPIDO_LIMITE_DIARIO_USD,
         "gasto_hoje_usd": round(sniper_rapido.gasto_hoje_usd(), 2),
         "restante_hoje_usd": round(sniper_rapido.restante_hoje_usd(), 2),
