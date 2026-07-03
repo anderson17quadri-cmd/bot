@@ -156,12 +156,39 @@ def _apagar_pid_info() -> None:
 
 
 def _pid_vivo(pid: int) -> bool:
-    """os.kill(pid, 0) nao mata nada: sinal 0 so testa se o processo
-    existe. Se nao existir, o sistema levanta ProcessLookupError."""
+    """Verifica se o PID guardado em bot.pid ainda e MESMO o main.py do
+    bot, nao qualquer processo.
+
+    BUG CORRIGIDO: so fazer os.kill(pid, 0) nao chega - esse sinal so
+    confirma que EXISTE um processo com aquele numero, mas os PIDs sao
+    reaproveitados pelo sistema operativo. Se o bot morrer e mais tarde
+    outro processo qualquer (sem relacao nenhuma) receber o mesmo PID,
+    os.kill(pid, 0) continua a dizer "vivo" - e o indicador "Bot: A
+    CORRER" ficava preso, mesmo depois de "Parar Bot" ter funcionado de
+    verdade. E exatamente o que foi reportado.
+
+    Correcao: em Linux, confirma tambem que a linha de comando desse PID
+    (/proc/<pid>/cmdline) e mesmo o nosso main.py. Sem /proc (ex: outro
+    SO), cai de volta ao teste simples - mais fraco, mas nao pior do que
+    o comportamento anterior."""
     try:
-        os.kill(pid, 0)
-        return True
+        os.kill(pid, 0)  # sinal 0: nao mata, so confirma que o PID existe
     except (ProcessLookupError, PermissionError, TypeError):
+        return False
+
+    caminho_cmdline = f"/proc/{pid}/cmdline"
+    if not os.path.exists(caminho_cmdline):
+        return True  # sem /proc (nao-Linux) - aceita o teste simples
+
+    try:
+        with open(caminho_cmdline, "rb") as f:
+            # argumentos separados por bytes nulos: "python3\0main.py\0"
+            cmdline = f.read().decode("utf-8", errors="replace")
+        return "main.py" in cmdline
+    except OSError:
+        # Processo morreu mesmo entre o os.kill e a leitura, ou sem
+        # permissao para ler - trata como morto (mais seguro do que
+        # assumir vivo e ficar com o indicador preso)
         return False
 
 

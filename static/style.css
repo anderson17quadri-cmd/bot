@@ -346,6 +346,16 @@ h1 .subtitulo { color: var(--accent); font-weight: 600; font-size: 0.7rem; lette
 }
 .flash { animation: flash-valor 0.6s ease-out; border-radius: 6px; }
 
+/* Flash verde/vermelho no VALOR ATUAL de uma posicao aberta, quando
+   muda entre polls - mostra que a posicao esta "viva" em tempo real.
+   A tabela e re-renderizada de raiz a cada poll, por isso a celula com
+   esta classe e sempre um elemento NOVO - a animacao dispara sozinha
+   ao ser inserida, sem precisar do truque de forcar reflow. */
+@keyframes flash-subida-valor { 0% { background: rgba(46, 224, 111, 0.35); } 100% { background: transparent; } }
+@keyframes flash-descida-valor { 0% { background: rgba(255, 92, 122, 0.35); } 100% { background: transparent; } }
+.flash-subida  { animation: flash-subida-valor 1.2s ease-out; border-radius: 4px; }
+.flash-descida { animation: flash-descida-valor 1.2s ease-out; border-radius: 4px; }
+
 /* Loading state: enquanto o body tem a classe 'carregando', os valores
    mostram um "esqueleto" a pulsar em vez do texto */
 @keyframes brilho { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.9; } }

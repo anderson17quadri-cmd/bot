@@ -879,6 +879,12 @@ async function atualizarResumo() {
 }
 
 /** Atualiza a tabela de posicoes abertas (com preco atual da Jupiter) */
+// Guarda o ultimo valor_atual_usd visto por posicao (mint -> numero),
+// para o flash verde/vermelho saber se o preco subiu ou desceu desde a
+// ultima leitura - a tabela e sempre re-renderizada de raiz a cada
+// polling, por isso precisamos de comparar com este estado a parte.
+const _ultimoValorPosicao = {};
+
 async function atualizarPosicoes() {
   const resposta = await fetch("/api/posicoes");
   const dados = await resposta.json();
@@ -892,6 +898,17 @@ async function atualizarPosicoes() {
     if (p.lucro_nao_realizado_usd !== null) {
       const classe = p.lucro_nao_realizado_usd >= 0 ? "positivo" : "negativo";
       celulaPL = `<td class="${classe}">${dinheiroComSinal(p.lucro_nao_realizado_usd)}</td>`;
+    }
+
+    // Flash verde/vermelho no VALOR ATUAL se mudou desde a ultima leitura
+    // (a posicao esta "viva" - o utilizador ve-a mexer em tempo real)
+    let classeFlashValor = "";
+    if (p.valor_atual_usd !== null) {
+      const anterior = _ultimoValorPosicao[p.mint];
+      if (anterior !== undefined && anterior !== p.valor_atual_usd) {
+        classeFlashValor = p.valor_atual_usd > anterior ? "flash-subida" : "flash-descida";
+      }
+      _ultimoValorPosicao[p.mint] = p.valor_atual_usd;
     }
     // Tag para distinguir compras na bonding curve das compras normais
     const tagCurva = p.origem === "bonding_curve"
@@ -910,7 +927,7 @@ async function atualizarPosicoes() {
       <td>${precoUnitario(p.preco_compra_usd)}</td>
       <td><span title="${qtdExata}">${abreviarQuantidade(p.quantidade_tokens)}</span></td>
       <td>${tempoDecorrido(p.timestamp_compra)}</td>
-      <td>${p.valor_atual_usd === null ? "N/A" : dinheiro(p.valor_atual_usd)}</td>
+      <td class="${classeFlashValor}">${p.valor_atual_usd === null ? "N/A" : dinheiro(p.valor_atual_usd)}</td>
       ${celulaPL}
       <td class="acoes-posicao">
         <button class="btn btn-mini btn-perigo" data-vender="50" data-mint="${p.mint}" data-simbolo="${p.simbolo}">50%</button>
