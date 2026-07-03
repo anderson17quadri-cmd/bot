@@ -66,12 +66,51 @@ ZONA_AMBIGUA_MAX = _env_int("ZONA_AMBIGUA_MAX", 70)
 LIQUIDEZ_MINIMA_USD = _env_float("LIQUIDEZ_MINIMA_USD", 2000.0)
 MAX_ANALISES_POR_CICLO = _env_int("MAX_ANALISES_POR_CICLO", 5)
 PAUSA_ENTRE_TOKENS = _env_float("PAUSA_ENTRE_TOKENS", 1.0)
-REDE = "solana"
 
+# --- Multi-chain (Parte B) ---------------------------------------------
+# REDE fica como a rede "principal"/legada (Solana) para o codigo antigo
+# que ainda a referencia. REDES_ATIVAS e a lista de redes a monitorizar
+# em paralelo: por defeito so a Solana; poe "solana,bsc" no .env para
+# ligar a BSC. So aceitamos redes que sabemos tratar.
+REDE = "solana"
+_REDES_SUPORTADAS = {"solana", "bsc"}
+REDES_ATIVAS = [
+    r.strip().lower()
+    for r in _env_texto("REDES_ATIVAS", "solana").split(",")
+    if r.strip().lower() in _REDES_SUPORTADAS
+] or ["solana"]
+
+# Tokens-base (o "outro lado" do par: moeda/estveis) por chain. Servem
+# para o detector saber qual dos dois lados do par e o TOKEN NOVO.
 MINT_SOL = "So11111111111111111111111111111111111111112"
 MINT_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 MINT_USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
-MINTS_BASE_CONHECIDOS = {MINT_SOL, MINT_USDC, MINT_USDT}
+MINTS_BASE_CONHECIDOS = {MINT_SOL, MINT_USDC, MINT_USDT}  # Solana (legado)
+
+# BSC (enderecos Ethereum 0x..., em minusculas para comparar sem falhas)
+BSC_WBNB = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+BSC_USDT = "0x55d398326f99059ff775485246999027b3197955"
+BSC_BUSD = "0xe9e7cea3dedca5984780bafc599bd69add087d56"
+BSC_USDC = "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"
+
+# Mapa por chain: rede GeckoTerminal, prefixo dos ids e tokens-base
+CHAINS = {
+    "solana": {
+        "gecko": "solana",
+        "prefixo": "solana_",
+        "bases": {m.lower() for m in MINTS_BASE_CONHECIDOS},
+        "moeda": "SOL",
+    },
+    "bsc": {
+        "gecko": "bsc",
+        "prefixo": "bsc_",
+        "bases": {BSC_WBNB, BSC_USDT, BSC_BUSD, BSC_USDC},
+        "moeda": "BNB",
+    },
+}
+
+# RPC da BSC (so leitura para B1/B2; execucao real vem no B3)
+BSC_RPC_URL = _env_texto("BSC_RPC_URL", "https://bsc-dataseed.binance.org")
 
 
 # ==========================================================================
@@ -161,6 +200,7 @@ def fase2_configurada() -> bool:
 def resumo() -> str:
     linhas = [
         f"RPC Solana        : {SOLANA_RPC_URL}",
+        f"Redes ativas      : {', '.join(REDES_ATIVAS)}",
         f"Intervalo polling : {POLL_INTERVAL_SEGUNDOS}s",
         f"Zona ambigua      : {ZONA_AMBIGUA_MIN}-{ZONA_AMBIGUA_MAX}",
         f"Liquidez minima   : {LIQUIDEZ_MINIMA_USD:.0f} USD",

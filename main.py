@@ -153,6 +153,12 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
     if not config.fase2_configurada():
         return  # sem wallet configurada, Fase 2 desligada
 
+    # BSC: a execucao (PancakeSwap) e a fase B3 - ainda nao implementada.
+    # Ate la, os tokens BSC entram no fluxo so ate ao alerta/radar/watchlist,
+    # nunca sao comprados (o executor da Solana nao serve para EVM).
+    if dados.get("chain") == "bsc":
+        return
+
     # Se o token e do pump.fun e o modo curva esta ligado, esse caminho
     # trata dele (compra na curva ou rejeita) - nao duplicamos com Jupiter
     if tentar_comprar_curva(dados, analise_ia):
@@ -307,8 +313,20 @@ def reavaliar_watchlist() -> None:
 
 
 def processar_pool(pool: dict) -> None:
-    """Trata um pool novo do inicio ao fim: analisar -> IA -> alerta -> compra."""
-    dados = analyzer.analisar_onchain(pool)
+    """Trata um pool novo do inicio ao fim: analisar -> IA -> alerta -> compra.
+
+    A analise on-chain e escolhida pela CHAIN do pool: Solana usa o
+    analyzer.py (mint/freeze/holders via RPC); BSC usa o analyzer_bsc.py
+    (honeypot/taxas via Honeypot.is). A partir daqui o fluxo e o mesmo -
+    a IA, o alerta, o radar e a watchlist trabalham sobre o dict 'dados'.
+    """
+    chain = pool.get("chain", "solana")
+    if chain == "bsc":
+        import analyzer_bsc
+        dados = analyzer_bsc.analisar(pool)
+    else:
+        dados = analyzer.analisar_onchain(pool)
+
     analise_ia = avaliar_com_ia(dados)
     alerts.mostrar_alerta(dados, analise_ia)
     tentar_comprar(dados, analise_ia)
@@ -363,20 +381,29 @@ def main() -> None:
             "So DETECAO + ANALISE + ALERTA.[/dim]"
         )
 
-    alerts.console.print("\n[dim]Ctrl+C para parar.[/dim]\n")
+    alerts.console.print(
+        f"\n[dim]Redes ativas: {', '.join(config.REDES_ATIVAS)}. Ctrl+C para parar.[/dim]\n"
+    )
 
-    det = detector.DetectorPools(emitir_no_arranque=3)
+    # Um detector por rede ativa (Solana e/ou BSC) - correm em paralelo,
+    # cada um com o seu proprio estado de "ja vistos".
+    detetores = [
+        detector.DetectorPools(rede, emitir_no_arranque=3)
+        for rede in config.REDES_ATIVAS
+    ]
     ciclo = 0
     ultima_verificacao_posicoes = 0.0
 
     while True:
         ciclo += 1
-        try:
-            novos = det.buscar_novos()
-        except Exception as e:
-            alerts.info(f"[red]Erro a detetar pools:[/red] {e}")
-            time.sleep(config.POLL_INTERVAL_SEGUNDOS)
-            continue
+
+        # Junta os novos de TODAS as redes ativas neste ciclo
+        novos = []
+        for det in detetores:
+            try:
+                novos.extend(det.buscar_novos())
+            except Exception as e:
+                alerts.info(f"[red]Erro a detetar pools ({det.rede}):[/red] {e}")
 
         if not novos:
             alerts.info(f"[dim]ciclo {ciclo}: sem tokens novos. A aguardar {config.POLL_INTERVAL_SEGUNDOS}s...[/dim]")

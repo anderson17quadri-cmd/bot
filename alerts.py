@@ -64,6 +64,42 @@ def mostrar_alerta(dados: dict, analise_ia: dict) -> None:
     if dados.get("fdv_usd"):
         linhas.append(f"fdv      : ${dados['fdv_usd']:,.0f}")
 
+    # ----- BSC: sinais proprios (honeypot/taxas) em vez de autoridades -----
+    if dados.get("chain") == "bsc":
+        linhas.append("")
+        if dados.get("analise_indisponivel"):
+            linhas.append("[dim]analise Honeypot.is indisponivel[/dim]")
+        else:
+            hp = dados.get("honeypot")
+            if hp:
+                linhas.append("honeypot        : [red]SIM - NAO CONSEGUES VENDER[/red]")
+            else:
+                linhas.append("honeypot        : [green]nao[/green]")
+            bt, st = dados.get("buy_tax"), dados.get("sell_tax")
+            if st is not None:
+                cor = "red" if st >= 20 else ("yellow" if st >= 10 else "green")
+                linhas.append(f"taxas           : compra {bt or 0:.1f}% | venda [{cor}]{st:.1f}%[/{cor}]")
+            tot, fal = dados.get("holders_total"), dados.get("holders_falharam")
+            if tot:
+                linhas.append(f"holders         : {tot} (falharam venda: {fal or 0})")
+        # Fatores + scores partilham o resto da funcao (segue em baixo)
+        linhas.append("")
+        linhas.append("[bold]Fatores:[/bold]")
+        for f in dados["fatores_risco"]:
+            linhas.append(f"  - {f}")
+        linhas.append("")
+        linhas.append(f"[bold]Score heuristico[/bold] : {dados['score_heuristico']}/100")
+        c1 = analise_ia.get("camada1")
+        if c1:
+            conf = c1.get("confianca")
+            conf_txt = f" [dim](confianca: {conf}%)[/dim]" if conf is not None else ""
+            linhas.append(f"[bold]Camada 1 (DeepSeek)[/bold]: {c1['score']}/100{conf_txt} - {c1['justificacao']}")
+        titulo = f"[{cor}][bold]{rotulo}  ({score_final}/100)[/bold][/{cor}]"
+        rodape = f"[dim]{hora}  |  BSC  |  score via {analise_ia.get('fonte_score', '?')}[/dim]"
+        console.print(Panel("\n".join(linhas), title=titulo, subtitle=rodape,
+                            border_style=cor, padding=(1, 2)))
+        return
+
     # Autoridades (o dado mais importante de red flag)
     linhas.append("")
     if dados["onchain_disponivel"]:

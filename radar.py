@@ -75,6 +75,7 @@ def registar_analise(dados: dict, analise_ia: dict, comprado: bool) -> None:
     registos.insert(0, {  # insert(0, ...) = poe no INICIO (mais recente primeiro)
         "simbolo": dados.get("token_simbolo", "?"),
         "mint": dados.get("token_mint", ""),
+        "chain": dados.get("chain", "solana"),
         "dex": dados.get("dex", "?"),
         "idade_minutos": dados.get("idade_minutos"),
         "liquidez_usd": dados.get("liquidez_usd", 0.0),

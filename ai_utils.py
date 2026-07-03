@@ -22,6 +22,8 @@ _CAMPOS_PARA_IA = [
     "onchain_disponivel", "mint_authority", "freeze_authority", "supply",
     "holders_disponivel", "top_holder_pct", "top5_holders_pct",
     "liquidez_bloqueada", "deployer_tokens_criados", "liquidez_suspeita",
+    # Campos especificos de BSC (so aparecem quando chain=="bsc")
+    "chain", "honeypot", "buy_tax", "sell_tax",
     "score_heuristico", "fatores_risco",
 ]
 
