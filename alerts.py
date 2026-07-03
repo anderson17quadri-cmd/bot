@@ -76,11 +76,14 @@ def mostrar_alerta(dados: dict, analise_ia: dict) -> None:
     else:
         linhas.append("[dim]dados on-chain indisponiveis (RPC limitou)[/dim]")
 
-    # Holders
+    # Holders: % do maior + % dos 5 maiores juntos (via getTokenLargestAccounts)
     if dados["holders_disponivel"]:
-        linhas.append(f"maior holder     : {dados['top_holder_pct']:.1f}%")
+        top5 = dados.get("top5_holders_pct", 0.0)
+        linhas.append(
+            f"holders          : top {dados['top_holder_pct']:.1f}% | top 5: {top5:.1f}%"
+        )
     else:
-        linhas.append("[dim]holders indisponiveis (RPC publico)[/dim]")
+        linhas.append("[dim]holders indisponiveis (falha do RPC)[/dim]")
 
     # Fatores de risco (a lista legivel do analyzer)
     linhas.append("")

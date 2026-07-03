@@ -192,6 +192,25 @@ def get_maiores_holders(mint: str, supply: float | None = None, limite: int = 20
     return holders
 
 
+def obter_maiores_holders(mint: str, supply: float | None = None) -> list[dict]:
+    """Versao "a prova de falha" do get_maiores_holders, pensada para o
+    ciclo principal do bot: se QUALQUER coisa correr mal (rate limit,
+    RPC em baixo, timeout, resposta estranha), devolve lista vazia em
+    vez de levantar excecao - o bot segue em frente sem holders, como
+    antes, e nunca rebenta por causa disto.
+
+    Com um RPC como o Helius configurado no .env, o metodo
+    getTokenLargestAccounts funciona a primeira e a lista vem cheia
+    (ate 20 contas, da maior para a mais pequena).
+    """
+    try:
+        return get_maiores_holders(mint, supply=supply, limite=20)
+    except Exception:
+        # Apanha tudo: RPCError/RPCRateLimit, falhas de rede, JSON mal
+        # formado... a resposta certa e sempre "sem dados", nunca parar o bot
+        return []
+
+
 # --------------------------------------------------------------------------
 # Teste rapido:  python rpc.py
 # Usa o BONK (token conhecido) para confirmarmos que a leitura funciona.

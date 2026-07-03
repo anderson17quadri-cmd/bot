@@ -51,16 +51,17 @@ def _calcular_score(dados: dict) -> tuple[int, list[str]]:
     # --- Concentracao de holders (so se a leitura funcionou) ---
     if dados["holders_disponivel"]:
         top = dados["top_holder_pct"]
+        top5 = dados["top5_holders_pct"]
         if top > config.LIMITE_HOLDER_ALTO:
             score += config.PESO_HOLDER_ALTO
-            fatores.append(f"Holder muito concentrado: {top:.1f}% num so endereco")
+            fatores.append(f"Holder muito concentrado: {top:.1f}% num so endereco (top 5: {top5:.1f}%)")
         elif top > config.LIMITE_HOLDER_MEDIO:
             score += config.PESO_HOLDER_MEDIO
-            fatores.append(f"Concentracao media: {top:.1f}% no maior holder")
+            fatores.append(f"Concentracao media: {top:.1f}% no maior holder (top 5: {top5:.1f}%)")
         else:
-            fatores.append(f"Distribuicao ok: maior holder tem {top:.1f}%")
+            fatores.append(f"Distribuicao ok: maior holder tem {top:.1f}% (top 5: {top5:.1f}%)")
     else:
-        fatores.append("Distribuicao de holders INDISPONIVEL (RPC publico limita)")
+        fatores.append("Distribuicao de holders INDISPONIVEL (falha do RPC)")
 
     # --- Liquidez ---
     liq = dados["liquidez_usd"]
@@ -107,20 +108,24 @@ def analisar_onchain(pool_info: dict) -> dict:
     except rpc.RPCError:
         onchain_disponivel = False
 
-    # -------- 2) Distribuicao de holders (best-effort) --------
+    # -------- 2) Distribuicao de holders (uma chamada por token) --------
+    # getTokenLargestAccounts devolve as 20 maiores contas do token.
+    # obter_maiores_holders nunca levanta excecao: se o RPC falhar
+    # (rate limit, Helius em baixo...), vem lista vazia e seguimos.
     holders_disponivel = False
     top_holders: list[dict] = []
     top_holder_pct = 0.0
+    top5_holders_pct = 0.0
     if onchain_disponivel:  # so tentamos se ja conseguimos falar com o RPC
-        try:
-            top_holders = rpc.get_maiores_holders(mint, supply=supply, limite=5)
-            if top_holders:
-                holders_disponivel = True
-                top_holder_pct = max(h["pct"] for h in top_holders)
-        except rpc.RPCRateLimit:
-            holders_disponivel = False
-        except rpc.RPCError:
-            holders_disponivel = False
+        top_holders = rpc.obter_maiores_holders(mint, supply=supply)
+        if top_holders:
+            holders_disponivel = True
+            # A lista vem ordenada da maior conta para a mais pequena,
+            # mas usamos max() por seguranca (nao custa nada)
+            top_holder_pct = max(h["pct"] for h in top_holders)
+            # % que os 5 maiores detem JUNTOS (visao de concentracao real:
+            # 5 carteiras com 15% cada = 75%, tao mau como 1 com 75%)
+            top5_holders_pct = sum(h["pct"] for h in top_holders[:5])
 
     # -------- 3) Montar o dicionario de dados do token --------
     dados = {
@@ -143,6 +148,7 @@ def analisar_onchain(pool_info: dict) -> dict:
         "holders_disponivel": holders_disponivel,
         "top_holders": top_holders,
         "top_holder_pct": round(top_holder_pct, 2),
+        "top5_holders_pct": round(top5_holders_pct, 2),
     }
 
     # -------- 4) Calcular score heuristico --------

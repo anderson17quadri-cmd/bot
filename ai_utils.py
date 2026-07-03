@@ -20,7 +20,7 @@ _CAMPOS_PARA_IA = [
     "token_simbolo", "token_mint", "dex", "nome_par",
     "liquidez_usd", "fdv_usd", "idade_minutos",
     "onchain_disponivel", "mint_authority", "freeze_authority", "supply",
-    "holders_disponivel", "top_holder_pct",
+    "holders_disponivel", "top_holder_pct", "top5_holders_pct",
     "score_heuristico", "fatores_risco",
 ]
 
@@ -44,7 +44,11 @@ def construir_prompt(dados_token: dict) -> str:
         "- 'freeze_authority' nao-nulo = podem congelar carteiras (red flag grave).\n"
         "- Liquidez muito baixa aumenta o risco de rug/pouca saida.\n"
         "- Se 'holders_disponivel' for false, NAO penalizes por isso; menciona a incerteza.\n"
-        "- Se olhares a concentracao, lembra-te que o maior holder pode ser o proprio pool.\n\n"
+        "- 'top_holder_pct' = % do supply na maior conta; 'top5_holders_pct' = % nas 5\n"
+        "  maiores JUNTAS. Concentracao alta no top 5 e red flag mesmo que nenhuma\n"
+        "  conta sozinha domine (ex: 5 carteiras com 15% cada).\n"
+        "- Se olhares a concentracao, lembra-te que o maior holder pode ser o proprio\n"
+        "  pool de liquidez (nesse caso desconta essa conta na tua leitura).\n\n"
         "Devolve APENAS um objeto JSON valido, sem qualquer texto extra, no formato:\n"
         '{"score": <inteiro 0-100, onde 0=seguro e 100=perigoso/scam>, '
         '"justificacao": "<frase curta, max 200 caracteres, em portugues>"}'
