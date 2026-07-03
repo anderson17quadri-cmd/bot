@@ -442,6 +442,7 @@ tr:last-child td { border-bottom: none; }
 .tag.venda    { background: rgba(46, 224, 111, 0.13);  color: var(--verde); }
 .tag.comprado { background: rgba(139, 124, 246, 0.18); color: var(--accent); }
 .tag.curva    { background: rgba(250, 178, 25, 0.16);  color: var(--amarelo); }
+.tag.manual   { background: rgba(125, 133, 144, 0.2);  color: var(--texto-suave); }
 /* Etiquetas de rede: Solana (roxo) e BSC (amarelo BNB) */
 .tag.chain-solana { background: rgba(139, 124, 246, 0.15); color: var(--accent); font-size: 0.6rem; padding: 2px 6px; }
 .tag.chain-bsc    { background: rgba(243, 186, 47, 0.16);  color: #f3ba2f; font-size: 0.6rem; padding: 2px 6px; }
@@ -481,13 +482,14 @@ tr:last-child td { border-bottom: none; }
   align-items: center;
   flex-wrap: wrap;   /* no telemovel o QR pode passar para cima do texto */
 }
-/* O QR precisa de fundo claro para as apps de camara o lerem bem */
+/* O QR precisa de fundo claro para as apps de camara o lerem bem.
+   (v2 mais compacto: 120px em vez de 132px) */
 .qr-caixa {
   background: #ffffff;
-  border-radius: 10px;
-  padding: 8px;
-  width: 132px;
-  height: 132px;
+  border-radius: 8px;
+  padding: 6px;
+  width: 120px;
+  height: 120px;
   flex-shrink: 0;
 }
 .qr-caixa svg { width: 100%; height: 100%; display: block; }
@@ -507,12 +509,12 @@ tr:last-child td { border-bottom: none; }
   font-weight: 600;
 }
 .endereco-wallet {
-  font-size: 0.78rem;
+  font-size: 0.72rem;      /* v2 mais compacto */
   color: var(--texto-suave);
   background: #0a0d12;
   border: 1px solid var(--linha-grelha);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: 7px;
+  padding: 6px 8px;
   word-break: break-all;   /* endereco de 44 chars quebra em vez de estourar */
 }
 .carteira-acoes { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -539,6 +541,34 @@ tr:last-child td { border-bottom: none; }
 .estado-liq { color: var(--texto-mudo); font-size: 0.72rem; font-family: var(--fonte-texto); }
 .estado-liq.viva  { color: var(--verde); }
 .estado-liq.morta { color: var(--vermelho); }
+
+/* Filtros da tabela de historico */
+.filtros-hist { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.campo-filtro {
+  background: #0a0d12;
+  border: 1px solid var(--linha-grelha);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--texto-suave);
+  font-family: var(--fonte-texto);
+  font-size: 0.78rem;
+}
+.campo-filtro:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#filtro-hist-simbolo { flex: 1; min-width: 100px; }
+
+/* Botao "x" de remover uma entrada do historico */
+.btn-remover {
+  background: transparent; border: none; color: var(--texto-mudo);
+  font-size: 0.9rem; cursor: pointer; padding: 2px 6px; border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.btn-remover:hover { color: var(--vermelho); background: rgba(255, 92, 122, 0.1); }
+
+/* Historico mais compacto (item 2): menos padding e fonte menor nas celulas */
+#tabela-historico td { padding: 6px 8px; font-size: 0.74rem; }
+
+/* Botoes de acao das posicoes: quebram para varias linhas sem esticar */
+.acoes-posicao { display: flex; gap: 5px; flex-wrap: wrap; }
 
 /* ==========================================================================
    ESTADOS VAZIOS (icone grande + mensagem amigavel)

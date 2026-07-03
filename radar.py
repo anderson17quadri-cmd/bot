@@ -79,6 +79,7 @@ def registar_analise(dados: dict, analise_ia: dict, comprado: bool) -> None:
         "dex": dados.get("dex", "?"),
         "idade_minutos": dados.get("idade_minutos"),
         "liquidez_usd": dados.get("liquidez_usd", 0.0),
+        "fdv_usd": dados.get("fdv_usd"),  # marketcap (FDV) - pode ser None
         "score": analise_ia.get("score_final", 0),
         "fonte_score": analise_ia.get("fonte_score", "heuristico"),
         "confianca": camada1.get("confianca"),

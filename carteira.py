@@ -115,6 +115,22 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
     _guardar(dados)
 
 
+def remover_do_historico(timestamp: str) -> bool:
+    """Remove UMA entrada do historico pelo seu timestamp (identificador
+    estavel - ao contrario do indice, que muda com a ordenacao no ecra).
+
+    NAO mexe no saldo: e so limpeza visual do historico, a pedido do
+    utilizador. Devolve True se removeu algo, False se nao encontrou.
+    """
+    dados = _carregar()
+    antes = len(dados["historico"])
+    dados["historico"] = [h for h in dados["historico"] if h.get("timestamp") != timestamp]
+    if len(dados["historico"]) == antes:
+        return False  # nao encontrou nenhuma entrada com esse timestamp
+    _guardar(dados)
+    return True
+
+
 def relatorio(valor_posicoes_abertas_usd: float = 0.0) -> str:
     """Gera um relatorio de texto com o resultado do modo de teste ate agora.
 

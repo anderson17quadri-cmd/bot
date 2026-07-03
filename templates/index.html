@@ -235,6 +235,7 @@
               <th>Score</th>
               <th>Conf.</th>
               <th>Liquidez</th>
+              <th>Marketcap</th>
               <th>Estado</th>
               <th>Há</th>
               <th>Ações</th>
@@ -261,6 +262,7 @@
               <th>Símbolo</th>
               <th>Score</th>
               <th>Liquidez</th>
+              <th>Marketcap</th>
               <th>DEX</th>
               <th>Detetado há</th>
             </tr>
@@ -277,6 +279,20 @@
     <!-- ================= 8. HISTORICO DE TRADES ================= -->
     <section class="painel">
       <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-lista"/></svg> Histórico de trades</h2>
+      <!-- Filtros (todos client-side, sem novo pedido ao servidor) -->
+      <div class="filtros-hist">
+        <input type="text" id="filtro-hist-simbolo" class="campo-filtro" placeholder="🔎 símbolo…" autocomplete="off">
+        <select id="filtro-hist-resultado" class="campo-filtro">
+          <option value="todos">Todos</option>
+          <option value="lucro">Só lucro</option>
+          <option value="prejuizo">Só prejuízo</option>
+        </select>
+        <select id="filtro-hist-periodo" class="campo-filtro">
+          <option value="tudo">Tudo</option>
+          <option value="hoje">Hoje</option>
+          <option value="7dias">7 dias</option>
+        </select>
+      </div>
       <div class="tabela-scroll">
         <table>
           <thead>
@@ -288,6 +304,7 @@
               <th>P. compra</th>
               <th>P. venda</th>
               <th>Lucro</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="tabela-historico"></tbody>

@@ -90,6 +90,7 @@ def adicionar(dados: dict, analise_ia: dict) -> None:
         existente["score"] = analise_ia.get("score_final", existente.get("score"))
         existente["confianca"] = camada1.get("confianca", existente.get("confianca"))
         existente["liquidez_usd"] = dados.get("liquidez_usd", existente.get("liquidez_usd"))
+        existente["fdv_usd"] = dados.get("fdv_usd", existente.get("fdv_usd"))
         registos.insert(0, existente)
     else:
         registos.insert(0, {
@@ -100,6 +101,7 @@ def adicionar(dados: dict, analise_ia: dict) -> None:
             "score": analise_ia.get("score_final", 0),
             "confianca": camada1.get("confianca"),
             "liquidez_usd": dados.get("liquidez_usd", 0.0),
+            "fdv_usd": dados.get("fdv_usd"),  # marketcap (FDV)
             "liquidez_bloqueada": dados.get("liquidez_bloqueada", "desconhecido"),
             "seguido": False,
             "adicionado_em": datetime.now(timezone.utc).isoformat(),

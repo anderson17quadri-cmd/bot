@@ -40,11 +40,32 @@ function dinheiroComSinal(valor) {
   return (valor >= 0 ? "+" : "-") + dinheiro(Math.abs(valor));
 }
 
-/** Preco unitario de tokens (numeros minusculos tipo 4.2e-9):
-    mostra 4 algarismos significativos, ou "–" se nao houver dado */
+/** Preco unitario de tokens. Numeros minusculos (tipo 7.772e-12) sao a
+    grande dor: em notacao cientifica sao ilegiveis. Aqui expandimos para
+    decimal SEM notacao cientifica, tipo $0.0000000077 (4 algarismos
+    significativos). Para numeros normais (>= 0.01) mostra 4 casas.
+    "–" se nao houver dado. */
 function precoUnitario(valor) {
   if (valor === null || valor === undefined) return "–";
-  return "$" + Number(valor).toPrecision(4);
+  const n = Number(valor);
+  if (n === 0) return "$0";
+  if (n >= 0.01) return "$" + n.toFixed(4);
+
+  // Quantos zeros ha entre a virgula e o 1.o digito -> casas necessarias
+  const zeros = -Math.floor(Math.log10(n)) - 1;
+  // zeros + 4 significativos; toFixed nao usa notacao cientifica
+  let texto = n.toFixed(zeros + 4);
+  texto = texto.replace(/0+$/, "");  // tira zeros finais desnecessarios
+  return "$" + texto;
+}
+
+/** Marketcap/FDV compacto: $1.2M, $45K, $980 ou "–" */
+function marketcap(valor) {
+  if (valor === null || valor === undefined) return "–";
+  const n = Number(valor);
+  if (n >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
+  return "$" + n.toFixed(0);
 }
 
 /** Formata uma percentagem com sinal: +1,15% / -3,20% */
@@ -103,6 +124,28 @@ function alternarVazio(canvas, idMensagem, temDados) {
 // Filtro de chain ativo no dashboard ("todas" | "solana" | "bsc").
 // O polling filtra as tabelas por este valor, sem novo pedido ao servidor.
 let filtroChain = "todas";
+
+// Filtros da tabela de historico (todos client-side)
+const filtrosHist = { simbolo: "", resultado: "todos", periodo: "tudo" };
+
+/** Aplica os filtros de historico (simbolo, resultado, periodo) a uma linha */
+function passaFiltroHist(h) {
+  // Simbolo (busca parcial, sem distinguir maiusculas)
+  if (filtrosHist.simbolo &&
+      !(h.simbolo || "").toLowerCase().includes(filtrosHist.simbolo.toLowerCase())) {
+    return false;
+  }
+  // Resultado (so as vendas tem lucro; compras nao entram nos filtros de lucro)
+  if (filtrosHist.resultado === "lucro" && !(h.tipo === "venda" && h.lucro_usd > 0)) return false;
+  if (filtrosHist.resultado === "prejuizo" && !(h.tipo === "venda" && h.lucro_usd < 0)) return false;
+  // Periodo
+  if (filtrosHist.periodo !== "tudo" && h.timestamp) {
+    const idadeH = (Date.now() - new Date(h.timestamp).getTime()) / 3600000;
+    if (filtrosHist.periodo === "hoje" && idadeH > 24) return false;
+    if (filtrosHist.periodo === "7dias" && idadeH > 24 * 7) return false;
+  }
+  return true;
+}
 
 /** True se um registo (com campo .chain) deve aparecer com o filtro atual */
 function passaFiltroChain(item) {
@@ -338,6 +381,22 @@ el("btn-reiniciar").addEventListener("click", async () => {
   else toast(r.erro || "Falha ao reiniciar.", "erro");
   el("btn-reiniciar").disabled = false;
   await atualizarStatus();
+});
+
+// --- Filtros da tabela de historico ---
+// Ao mudar qualquer filtro, guardamos o valor e re-desenhamos o resumo
+// (que redesenha a tabela de historico ja filtrada)
+el("filtro-hist-simbolo").addEventListener("input", (e) => {
+  filtrosHist.simbolo = e.target.value.trim();
+  atualizarResumo();
+});
+el("filtro-hist-resultado").addEventListener("change", (e) => {
+  filtrosHist.resultado = e.target.value;
+  atualizarResumo();
+});
+el("filtro-hist-periodo").addEventListener("change", (e) => {
+  filtrosHist.periodo = e.target.value;
+  atualizarResumo();
 });
 
 // --- Filtro de chain (chips Todas / Solana / BSC) ---
@@ -618,7 +677,8 @@ async function atualizarResumo() {
   graficoVelas.update();
 
   // --- Tabela de historico (mais recente primeiro, ja vem ordenada) ---
-  const histVisivel = dados.historico.filter(passaFiltroChain);
+  // Aplica o filtro de chain + os filtros proprios do historico
+  const histVisivel = dados.historico.filter(passaFiltroChain).filter(passaFiltroHist);
   el("vazio-historico").hidden = histVisivel.length > 0;
   el("tabela-historico").innerHTML = histVisivel.map((h) => {
     const eVenda = h.tipo === "venda";
@@ -640,6 +700,7 @@ async function atualizarResumo() {
       <td>${precoUnitario(precoCompra)}</td>
       <td>${eVenda ? precoUnitario(h.preco_venda_usd) : "–"}</td>
       ${celulaLucro}
+      <td><button class="btn-remover" data-remover-hist="${h.timestamp}" title="Remover do histórico">✕</button></td>
     </tr>`;
   }).join("");
 }
@@ -662,18 +723,26 @@ async function atualizarPosicoes() {
     // Tag para distinguir compras na bonding curve das compras normais
     const tagCurva = p.origem === "bonding_curve"
       ? ' <span class="tag curva">BONDING CURVE</span>' : "";
+    // Badge MANUAL: acompanhamento automatico desligado nesta posicao
+    const auto = p.gestao_automatica !== false;
+    const tagManual = auto ? "" : ' <span class="tag manual">MANUAL</span>';
 
     return `<tr>
-      <td>${linkToken(p.mint, p.simbolo, p.dex, p.chain)}${tagChain(p.chain)}${tagCurva}</td>
+      <td>${linkToken(p.mint, p.simbolo, p.dex, p.chain)}${tagChain(p.chain)}${tagCurva}${tagManual}</td>
       <td>${dinheiro(p.valor_investido_usd)}</td>
-      <td>$${p.preco_compra_usd.toPrecision(4)}</td>
+      <td>${precoUnitario(p.preco_compra_usd)}</td>
       <td>${p.quantidade_tokens.toLocaleString("pt-PT", { maximumFractionDigits: 0 })}</td>
       <td>${tempoDecorrido(p.timestamp_compra)}</td>
       <td>${p.valor_atual_usd === null ? "N/A" : dinheiro(p.valor_atual_usd)}</td>
       ${celulaPL}
-      <td>
+      <td class="acoes-posicao">
         <button class="btn btn-mini btn-perigo" data-vender="50" data-mint="${p.mint}" data-simbolo="${p.simbolo}">50%</button>
         <button class="btn btn-mini btn-perigo" data-vender="100" data-mint="${p.mint}" data-simbolo="${p.simbolo}">100%</button>
+        <button class="btn btn-mini ${auto ? "btn-neutro" : "btn-verde"}"
+                data-auto="${auto ? "0" : "1"}" data-mint="${p.mint}"
+                title="${auto ? "Desativar acompanhamento automático" : "Reativar acompanhamento automático"}">
+          ${auto ? "Desativar auto" : "Reativar auto"}
+        </button>
       </td>
     </tr>`;
   }).join("");
@@ -703,6 +772,7 @@ async function atualizarWatchlist() {
       <td><span class="pastilha ${w.score < 30 ? "score-baixo" : w.score <= 60 ? "score-medio" : "score-alto"}">${w.score}</span></td>
       <td>${conf}</td>
       <td>${dinheiro(w.liquidez_usd)}</td>
+      <td>${marketcap(w.fdv_usd)}</td>
       <td>${estado}</td>
       <td>${tempoDecorrido(w.adicionado_em)}</td>
       <td>
@@ -739,6 +809,7 @@ async function atualizarRadar() {
       <td>${linkToken(r.mint, r.simbolo, r.dex, r.chain)}${tagChain(r.chain)}${tagComprado}</td>
       <td><span class="pastilha ${classeScore}">${r.score}</span></td>
       <td>${dinheiro(r.liquidez_usd)}</td>
+      <td>${marketcap(r.fdv_usd)}</td>
       <td>${r.dex || "?"}</td>
       <td>${tempoDecorrido(r.timestamp)}</td>
     </tr>`;
@@ -752,10 +823,34 @@ async function atualizarRadar() {
 // os seus listeners. Solucao classica: UM listener no documento que
 // apanha cliques nos botoes pelos atributos data-* (delegacao).
 document.addEventListener("click", async (evento) => {
-  const btn = evento.target.closest("button[data-vender], button[data-comprar], button[data-seguir]");
+  const btn = evento.target.closest(
+    "button[data-vender], button[data-comprar], button[data-seguir], " +
+    "button[data-auto], button[data-remover-hist]");
   if (!btn) return;
   const mint = btn.dataset.mint;
   const simbolo = btn.dataset.simbolo || "?";
+
+  // --- Desativar/reativar acompanhamento automatico de uma posicao ---
+  if (btn.dataset.auto !== undefined) {
+    const ativar = btn.dataset.auto === "1";
+    const r = await pedirAcao("/api/posicao/gestao", { mint, automatica: ativar });
+    if (r.ok) toast(ativar ? "Acompanhamento automático reativado." : "Posição agora só manual (auto desligado).", "sucesso");
+    else toast(r.erro || "Não foi possível alterar.", "erro");
+    atualizarPosicoes();
+    return;
+  }
+
+  // --- Remover uma entrada do historico (com confirmacao) ---
+  if (btn.dataset.removerHist !== undefined) {
+    if (!confirm("Remover esta entrada do histórico? Esta ação é irreversível (não afeta o saldo).")) return;
+    const ts = encodeURIComponent(btn.dataset.removerHist);
+    const resp = await fetch(`/api/historico/${ts}`, { method: "DELETE" });
+    const r = await resp.json();
+    if (r.ok) toast("Entrada removida do histórico.", "sucesso");
+    else toast(r.erro || "Não foi possível remover.", "erro");
+    atualizarResumo();
+    return;
+  }
 
   // --- Vender 50% / 100% de uma posicao ---
   if (btn.dataset.vender) {

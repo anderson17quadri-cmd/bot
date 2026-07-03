@@ -350,6 +350,8 @@ def api_posicoes():
             "dry_run": p.get("dry_run", True),
             "origem": p.get("origem"),  # "bonding_curve" ou None (compra normal)
             "chain": p.get("chain", "solana"),  # "solana" ou "bsc"
+            # Acompanhamento automatico ligado? (defeito True; False = so manual)
+            "gestao_automatica": p.get("gestao_automatica", True),
             "valor_atual_usd": round(valor_atual, 2) if valor_atual is not None else None,
             "lucro_nao_realizado_usd": lucro_nao_realizado,
         })
@@ -513,6 +515,31 @@ def _exigir_confirmo_em_modo_real(corpo: dict):
             "erro": "Modo REAL: esta ação usa dinheiro verdadeiro e exige a palavra CONFIRMO.",
         }), 400
     return None
+
+
+@app.route("/api/historico/<timestamp>", methods=["DELETE"])
+def api_remover_historico(timestamp):
+    """Remove uma entrada do historico (identificada pelo timestamp).
+    So limpeza visual - NAO mexe no saldo. Acao irreversivel (o frontend
+    pede confirmacao antes de chamar)."""
+    import carteira
+    if carteira.remover_do_historico(timestamp):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "erro": "Entrada não encontrada no histórico."}), 404
+
+
+@app.route("/api/posicao/gestao", methods=["POST"])
+def api_posicao_gestao():
+    """Liga/desliga o acompanhamento automatico (stop-loss/take-profit/
+    trailing) de UMA posicao. {"mint": ..., "automatica": true/false}.
+    So se aplica a posicoes ja abertas - guardado no proprio posicoes.json."""
+    import posicoes
+    corpo = request.get_json(silent=True) or {}
+    mint = corpo.get("mint", "")
+    if not mint or mint not in posicoes.listar_posicoes_abertas():
+        return jsonify({"ok": False, "erro": "Posição não encontrada."}), 404
+    posicoes.atualizar_posicao(mint, gestao_automatica=bool(corpo.get("automatica", True)))
+    return jsonify({"ok": True})
 
 
 @app.route("/api/watchlist")
