@@ -76,6 +76,23 @@
       <span class="aviso-curva" id="aviso-curva" hidden>⚠ risco de perda total</span>
     </div>
 
+    <!-- Toggle MAIS ARRISCADO DE TODOS: Modo Sniper Rapido ("caveira") -->
+    <div class="topo-linha linha-curva linha-sniper">
+      <label class="switch-curva">
+        <input type="checkbox" id="chk-sniper">
+        <span class="switch-visual switch-sniper"></span>
+        <span class="switch-texto">💀 Modo Sniper Rápido</span>
+      </label>
+      <span class="aviso-curva" id="aviso-sniper" hidden>⚠ compra sem esperar pela IA</span>
+    </div>
+    <!-- Barra do limite diario - so aparece quando o modo esta ligado -->
+    <div class="topo-linha linha-sniper-orcamento" id="linha-sniper-orcamento" hidden>
+      <div class="orcamento-sniper">
+        <div class="orcamento-barra"><div class="orcamento-preenchido" id="orcamento-sniper-barra"></div></div>
+        <span class="orcamento-texto" id="orcamento-sniper-texto">$0,00 / $0,00 gastos hoje</span>
+      </div>
+    </div>
+
     <div class="topo-linha">
       <!-- Indicador de estado do bot: bolinha pulsante + texto -->
       <div class="estado-bot" id="estado-bot">
@@ -433,6 +450,40 @@
       <div class="modal-botoes">
         <button class="btn btn-neutro" data-fechar>Cancelar</button>
         <button class="btn btn-perigo" id="btn-resetar-confirmar" disabled>Resetar tudo</button>
+      </div>
+    </div>
+
+    <!-- Modal H1: ativar Modo Sniper Rapido - 1o passo, SO em modo REAL
+         (mesma mecanica do aviso SIMULADO->REAL) -->
+    <div class="modal" id="modal-sniper-aviso-real" hidden>
+      <h3 class="perigo">⚠ Modo Sniper Rápido em modo REAL</h3>
+      <p class="texto-perigo">
+        Vais ativar o modo de compra <b>mais arriscado do bot</b>, em modo
+        <b>REAL</b> — dinheiro verdadeiro será gasto quase instantaneamente,
+        antes de qualquer análise de IA, em tokens com muito mais risco
+        que o normal. Tens a certeza?
+      </p>
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="btn-sniper-real-continuar">Continuar</button>
+      </div>
+    </div>
+
+    <!-- Modal H2: confirmacao final (SIMULADO: unico passo; REAL: 2o passo) -->
+    <div class="modal" id="modal-sniper-confirmo" hidden>
+      <h3 class="perigo">💀 Ativar Modo Sniper Rápido</h3>
+      <p class="texto-perigo">
+        Compra quase instantânea com verificações mínimas (sem esperar
+        pela IA), aceitando scores muito mais altos que o normal. Perdas
+        pequenas e frequentes são <b>esperadas</b> neste modo. Limite
+        diário: <b id="sniper-limite-preview">$0,00</b>.
+      </p>
+      <p>Escreve <b class="num">CONFIRMO</b> para ativar:</p>
+      <input type="text" id="input-sniper-confirmo" class="campo-texto num"
+             autocomplete="off" autocapitalize="characters" placeholder="CONFIRMO">
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="btn-sniper-confirmar" disabled>Ativar modo sniper</button>
       </div>
     </div>
 

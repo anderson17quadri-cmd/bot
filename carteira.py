@@ -118,7 +118,8 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
                    preco_compra_usd: float | None = None,
                    preco_venda_usd: float | None = None,
                    quantidade_tokens: float | None = None,
-                   chain: str = "solana") -> bool:
+                   chain: str = "solana",
+                   sniper_rapido: bool = False) -> bool:
     """Credita o valor recebido da venda no saldo virtual e regista o
     lucro/prejuizo realizado dessa operacao. Devolve False (e nao mexe
     no saldo) se o valor falhar a verificacao de sanidade - protecao
@@ -146,10 +147,25 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
         "preco_compra_usd": preco_compra_usd,
         "preco_venda_usd": preco_venda_usd,
         "quantidade_tokens": quantidade_tokens,
+        "sniper_rapido": sniper_rapido,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     _guardar(dados)
     return True
+
+
+def marcar_ultima_compra(mint: str, **campos) -> None:
+    """Acrescenta campos extra a entrada de COMPRA mais recente de um
+    mint (ex: sniper_rapido=True). Usado por modos de compra dedicados
+    (ex: sniper_rapido.py) que reutilizam o executor.comprar_token
+    partilhado mas querem marcar a origem SO no seu proprio codigo, sem
+    mexer na assinatura da funcao de compra partilhada."""
+    dados = _carregar()
+    for h in reversed(dados["historico"]):
+        if h.get("tipo") == "compra" and h.get("mint") == mint:
+            h.update(campos)
+            _guardar(dados)
+            return
 
 
 def remover_do_historico(timestamp: str) -> bool:

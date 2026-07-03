@@ -40,23 +40,46 @@ function dinheiroComSinal(valor) {
   return (valor >= 0 ? "+" : "-") + dinheiro(Math.abs(valor));
 }
 
+// Nunca deixar um preco ocupar mais do que isto na tabela (em caracteres
+// visiveis) - acima disto, corta e mostra o valor completo em tooltip
+// (desktop) + clique-para-copiar (telemovel, sem hover).
+const ORCAMENTO_PRECO_CHARS = 14;
+
 /** Preco unitario de tokens. Numeros minusculos (tipo 7.772e-12) sao a
     grande dor: em notacao cientifica sao ilegiveis. Aqui expandimos para
-    decimal SEM notacao cientifica, tipo $0.0000000077 (4 algarismos
-    significativos). Para numeros normais (>= 0.01) mostra 4 casas.
-    "–" se nao houver dado. */
+    decimal SEM notacao cientifica (ex: $0.000000000007772). Para numeros
+    normais (>= 0.01) mostra 4 casas. Se o resultado ultrapassar o
+    orcamento de ~14 caracteres, corta com "…" e poe o valor completo
+    num title (tooltip) + clicavel para copiar. "–" se nao houver dado. */
 function precoUnitario(valor) {
   if (valor === null || valor === undefined) return "–";
   const n = Number(valor);
   if (n === 0) return "$0";
-  if (n >= 0.01) return "$" + n.toFixed(4);
+  if (n >= 0.01) return "$" + n.toFixed(4);  // sempre curto, nunca precisa de corte
 
   // Quantos zeros ha entre a virgula e o 1.o digito -> casas necessarias
   const zeros = -Math.floor(Math.log10(n)) - 1;
-  // zeros + 4 significativos; toFixed nao usa notacao cientifica
   let texto = n.toFixed(zeros + 4);
   texto = texto.replace(/0+$/, "");  // tira zeros finais desnecessarios
-  return "$" + texto;
+  const completo = "$" + texto;
+
+  if (completo.length <= ORCAMENTO_PRECO_CHARS) return completo;
+
+  const cortado = completo.slice(0, ORCAMENTO_PRECO_CHARS - 1) + "…";
+  return `<span class="preco-truncado" title="${completo}" data-copiar="${completo}">${cortado}</span>`;
+}
+
+/** Abrevia quantidades de tokens grandes: 1,000 -> "1K", 8419232150144
+    -> "8.42T". Evita numeros gigantes ilegiveis nas tabelas. */
+function abreviarQuantidade(valor) {
+  if (valor === null || valor === undefined) return "–";
+  const n = Number(valor);
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return (n / 1e12).toFixed(2) + "T";
+  if (abs >= 1e9) return (n / 1e9).toFixed(2) + "B";
+  if (abs >= 1e6) return (n / 1e6).toFixed(2) + "M";
+  if (abs >= 1e3) return (n / 1e3).toFixed(2) + "K";
+  return n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
 }
 
 /** Marketcap/FDV compacto: $1.2M, $45K, $980 ou "–" */
@@ -467,6 +490,73 @@ el("btn-curva-confirmar").addEventListener("click", async () => {
   atualizarCurva();
 });
 
+// --- Toggle do Modo Sniper Rapido (o mais arriscado dos 3 modos) ---
+// Em modo REAL, pede a MESMA dupla confirmacao (2 modais) do toggle
+// SIMULADO->REAL; em modo SIMULADO, um unico modal com CONFIRMO chega
+// (dinheiro virtual - mas o backend exige CONFIRMO sempre, nos dois casos).
+async function atualizarSniper() {
+  const dados = await (await fetch("/api/sniper")).json();
+  el("chk-sniper").checked = dados.ativo;
+  el("aviso-sniper").hidden = !dados.ativo;
+  el("sniper-limite-preview").textContent = "$" + dados.limite_diario_usd.toFixed(2);
+
+  // Barra do gasto diario - so aparece com o modo ligado
+  el("linha-sniper-orcamento").hidden = !dados.ativo;
+  if (dados.ativo) {
+    const pct = dados.limite_diario_usd > 0
+      ? Math.min(100, (dados.gasto_hoje_usd / dados.limite_diario_usd) * 100) : 0;
+    el("orcamento-sniper-barra").style.width = pct + "%";
+    el("orcamento-sniper-barra").classList.toggle("cheio", pct >= 90);
+    el("orcamento-sniper-texto").textContent =
+      `$${dados.gasto_hoje_usd.toFixed(2)} / $${dados.limite_diario_usd.toFixed(2)} gastos hoje ` +
+      `(restam $${dados.restante_hoje_usd.toFixed(2)})`;
+  }
+}
+
+el("chk-sniper").addEventListener("click", (evento) => {
+  if (evento.target.checked) {
+    evento.preventDefault(); // so liga depois da(s) confirmacao(oes)
+    const emReal = estadoBot && !estadoBot.dry_run_env;
+    if (emReal) {
+      abrirModal("modal-sniper-aviso-real");  // 1o passo, so em REAL
+    } else {
+      el("input-sniper-confirmo").value = "";
+      el("btn-sniper-confirmar").disabled = true;
+      abrirModal("modal-sniper-confirmo");
+      el("input-sniper-confirmo").focus();
+    }
+  } else {
+    pedirAcao("/api/sniper", { ativo: false }).then(() => {
+      toast("Modo Sniper Rápido desligado.", "sucesso");
+      atualizarSniper();
+    });
+  }
+});
+
+// Modal H1 (so REAL) -> avanca para o modal de CONFIRMO (H2)
+el("btn-sniper-real-continuar").addEventListener("click", () => {
+  el("input-sniper-confirmo").value = "";
+  el("btn-sniper-confirmar").disabled = true;
+  abrirModal("modal-sniper-confirmo");
+  el("input-sniper-confirmo").focus();
+});
+
+el("input-sniper-confirmo").addEventListener("input", () => {
+  el("btn-sniper-confirmar").disabled = el("input-sniper-confirmo").value.trim() !== "CONFIRMO";
+});
+el("btn-sniper-confirmar").addEventListener("click", async () => {
+  const r = await pedirAcao("/api/sniper", {
+    ativo: true, confirmacao: el("input-sniper-confirmo").value.trim(),
+  });
+  fecharModais();
+  if (r.ok) {
+    toast("💀 Modo Sniper Rápido ATIVADO" + (r.precisa_reiniciar ? " — reinicia o bot para aplicar." : "."), "sucesso");
+  } else {
+    toast(r.erro || "Não foi possível ativar.", "erro");
+  }
+  atualizarSniper();
+});
+
 // --- Toggle SIMULADO/REAL (controlo segmentado) ---
 
 /** Pede ao backend para mudar o modo no .env */
@@ -645,7 +735,9 @@ async function atualizarTokensCarteira() {
   }
 
   el("tabela-tokens").innerHTML = tokens.map((t) => {
-    const qtd = t.quantidade.toLocaleString("pt-PT", { maximumFractionDigits: 4 });
+    // Abreviado na tabela (K/M/B/T); o valor exato completo fica no title
+    const qtdExata = t.quantidade.toLocaleString("pt-PT", { maximumFractionDigits: 4 });
+    const qtd = `<span title="${qtdExata}">${abreviarQuantidade(t.quantidade)}</span>`;
     const valor = t.valor_usd === null || t.valor_usd === undefined ? "–" : dinheiro(t.valor_usd);
     // Guardamos os dados do token nos data-* para o modal de envio os ler
     return `<tr>
@@ -772,10 +864,11 @@ async function atualizarResumo() {
     // ha os dois (registos antigos sem estes campos mostram "–")
     const precoCompra = eVenda ? h.preco_compra_usd : h.preco_unitario_usd;
 
+    const tagSniperHist = h.sniper_rapido ? ' <span class="tag sniper" title="Modo Sniper Rápido">💀</span>' : "";
     return `<tr>
       <td>${dataHora(h.timestamp)}</td>
       <td><span class="tag ${eVenda ? "venda" : "compra"}">${eVenda ? "VENDA" : "COMPRA"}</span></td>
-      <td>${linkToken(h.mint, h.simbolo, "", h.chain)}${tagChain(h.chain)}</td>
+      <td>${linkToken(h.mint, h.simbolo, "", h.chain)}${tagChain(h.chain)}${tagSniperHist}</td>
       <td>${dinheiro(h.valor_usd)}</td>
       <td>${precoUnitario(precoCompra)}</td>
       <td>${eVenda ? precoUnitario(h.preco_venda_usd) : "–"}</td>
@@ -803,15 +896,19 @@ async function atualizarPosicoes() {
     // Tag para distinguir compras na bonding curve das compras normais
     const tagCurva = p.origem === "bonding_curve"
       ? ' <span class="tag curva">BONDING CURVE</span>' : "";
+    // 💀 Comprado pelo Modo Sniper Rapido (sem esperar pela IA)
+    const tagSniper = p.sniper_rapido ? ' <span class="tag sniper" title="Comprado pelo Modo Sniper Rápido">💀 SNIPER</span>' : "";
     // Badge MANUAL: acompanhamento automatico desligado nesta posicao
     const auto = p.gestao_automatica !== false;
     const tagManual = auto ? "" : ' <span class="tag manual">MANUAL</span>';
 
+    // Abreviado (K/M/B/T) com o valor exato no title (hover/tooltip)
+    const qtdExata = p.quantidade_tokens.toLocaleString("pt-PT", { maximumFractionDigits: 0 });
     return `<tr>
-      <td>${linkToken(p.mint, p.simbolo, p.dex, p.chain)}${tagChain(p.chain)}${tagCurva}${tagManual}</td>
+      <td>${linkToken(p.mint, p.simbolo, p.dex, p.chain)}${tagChain(p.chain)}${tagCurva}${tagSniper}${tagManual}</td>
       <td>${dinheiro(p.valor_investido_usd)}</td>
       <td>${precoUnitario(p.preco_compra_usd)}</td>
-      <td>${p.quantidade_tokens.toLocaleString("pt-PT", { maximumFractionDigits: 0 })}</td>
+      <td><span title="${qtdExata}">${abreviarQuantidade(p.quantidade_tokens)}</span></td>
       <td>${tempoDecorrido(p.timestamp_compra)}</td>
       <td>${p.valor_atual_usd === null ? "N/A" : dinheiro(p.valor_atual_usd)}</td>
       ${celulaPL}
@@ -903,6 +1000,14 @@ async function atualizarRadar() {
 // os seus listeners. Solucao classica: UM listener no documento que
 // apanha cliques nos botoes pelos atributos data-* (delegacao).
 document.addEventListener("click", async (evento) => {
+  // Preco truncado (numero minusculo demais para a tabela): clicar copia
+  // o valor completo - cobre o telemovel, onde nao ha hover para o title
+  const precoTrunc = evento.target.closest(".preco-truncado");
+  if (precoTrunc) {
+    copiarTexto(precoTrunc.dataset.copiar);
+    return;
+  }
+
   // Botao "Enviar" da seccao Tokens na carteira (abre o modal de envio)
   const btnEnviar = evento.target.closest("button[data-enviar-mint]");
   if (btnEnviar) {
@@ -999,6 +1104,7 @@ async function atualizarTudo() {
       atualizarCarteira(),
       atualizarTokensCarteira(),
       atualizarCurva(),
+      atualizarSniper(),
     ]);
     el("ultima-atualizacao").textContent =
       "Atualizado às " + new Date().toLocaleTimeString("pt-PT");

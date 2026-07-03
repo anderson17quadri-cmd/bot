@@ -146,6 +146,109 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
     return True  # tratado pelo caminho da curva, nao cai no fluxo normal
 
 
+def tentar_comprar_sniper_rapido(dados: dict) -> bool:
+    """MODO SNIPER RAPIDO ("modo caveira") - o mais arriscado dos 3 modos
+    de compra do bot. Le config.py 7c) para o contexto completo.
+
+    ISOLAMENTO DELIBERADO: esta funcao NUNCA olha para SCORE_COMPRA_MAX,
+    MAX_TRADE_USD nem para analise_ia (a IA ainda nao correu quando isto
+    e chamado) - usa SO os seus proprios limiares (SNIPER_RAPIDO_*) e o
+    'score_heuristico' que o analyzer.py ja calculou so com verificacoes
+    on-chain instantaneas (mint/freeze authority, liquidez minima). E
+    chamada ANTES de avaliar_com_ia() no processar_pool, exatamente para
+    comprar antes da IA (mais lenta) terminar.
+
+    So Solana por agora (o mesmo mint tem de ser negociavel via Jupiter
+    de imediato - a BSC e a bonding curve do pump.fun tem os seus
+    proprios modos dedicados, propositadamente separados deste).
+
+    Devolve True se comprou (para o processar_pool marcar a posicao e,
+    mais tarde, decidir se a vende de urgencia consoante o score da IA).
+    """
+    if not config.SNIPER_RAPIDO_ATIVO:
+        return False
+    if dados.get("chain") == "bsc":
+        return False  # este modo e so Solana/Jupiter, por desenho
+    if not config.fase2_configurada():
+        return False  # sem wallet, sem trading
+
+    score = dados["score_heuristico"]  # SO heuristico - nunca a IA
+    if score > config.SNIPER_RAPIDO_SCORE_MAX:
+        return False
+
+    mint = dados["token_mint"]
+    simbolo = dados["token_simbolo"]
+    if mint in posicoes.listar_posicoes_abertas():
+        return False  # ja ha posicao neste token (de qualquer modo)
+
+    valor = config.SNIPER_RAPIDO_VALOR_USD
+
+    # Limite diario OBRIGATORIO - a principal trava deste modo
+    import sniper_rapido
+    if not sniper_rapido.pode_gastar(valor):
+        alerts.info(
+            f"[dim][💀 sniper] {simbolo} ignorado - limite diario atingido "
+            f"(restam ${sniper_rapido.restante_hoje_usd():.2f})[/dim]"
+        )
+        return False
+
+    if config.DRY_RUN:
+        import carteira
+        if carteira.saldo_disponivel() < valor:
+            return False
+
+    try:
+        preco_sol_usd = obter_preco_sol_usd()
+        r = executor.comprar_token(mint=mint, simbolo=simbolo,
+                                   valor_usd=valor, preco_sol_usd=preco_sol_usd)
+        if r.get("sucesso"):
+            posicoes.atualizar_posicao(mint, sniper_rapido=True)
+            if config.DRY_RUN:
+                import carteira
+                carteira.marcar_ultima_compra(mint, sniper_rapido=True)
+            sniper_rapido.registar_gasto(valor)
+            alerts.info(
+                f"[bold magenta]💀 [SNIPER RAPIDO] {r['mensagem']} "
+                f"(score heuristico {score}, SEM esperar pela IA)[/bold magenta]"
+            )
+            return True
+        alerts.info(f"[yellow]💀 [sniper] falha ao comprar {simbolo}: {r.get('mensagem')}[/yellow]")
+    except Exception as e:
+        alerts.info(f"[red]💀 [sniper] erro a comprar {simbolo}:[/red] {e}")
+    return False
+
+
+def vender_sniper_se_score_mau(dados: dict, analise_ia: dict) -> None:
+    """2a camada de protecao do modo sniper: se a analise COMPLETA da IA
+    (que so chega depois da compra, neste modo) disser que o token e mau
+    (score_final > SNIPER_RAPIDO_SCORE_VENDA_URGENTE), vende a posicao
+    imediatamente - independente das regras normais de stop-loss/take-
+    profit, que so correm no proximo ciclo de verificar_posicoes().
+
+    So mexe em posicoes marcadas 'sniper_rapido': True - nunca em
+    posicoes dos outros 2 modos (isolamento deliberado)."""
+    mint = dados["token_mint"]
+    posicao = posicoes.listar_posicoes_abertas().get(mint)
+    if not posicao or not posicao.get("sniper_rapido"):
+        return  # nao e uma posicao do sniper - nada a fazer aqui
+
+    score_final = analise_ia["score_final"]
+    if score_final <= config.SNIPER_RAPIDO_SCORE_VENDA_URGENTE:
+        return  # a IA nao achou mau o suficiente para vender de urgencia
+
+    alerts.info(
+        f"[bold red]💀 [SNIPER RAPIDO] IA deu score {score_final} (> "
+        f"{config.SNIPER_RAPIDO_SCORE_VENDA_URGENTE}) para {posicao['simbolo']} "
+        f"- venda de urgencia, ignorando as regras normais de stop-loss[/bold red]"
+    )
+    try:
+        r = executor.vender_token(mint, 100)
+        cor = "green" if r.get("sucesso") else "red"
+        alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
+    except Exception as e:
+        alerts.info(f"[red]💀 [sniper] falha na venda de urgencia:[/red] {e}")
+
+
 def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
     """Compra na BSC (via PancakeSwap), o equivalente ao tentar_comprar da
     Solana. Precisa da wallet BSC configurada; usa o limite BSC_MAX_TRADE_USD.
@@ -391,9 +494,20 @@ def processar_pool(pool: dict) -> None:
     else:
         dados = analyzer.analisar_onchain(pool)
 
+    # MODO SNIPER RAPIDO: corre AQUI, logo apos a analise on-chain e ANTES
+    # da chamada a IA (mais lenta) - e literalmente o ponto do modo:
+    # comprar antes da analise completa terminar. So usa o score
+    # heuristico (dados["score_heuristico"]), nunca a IA.
+    tentar_comprar_sniper_rapido(dados)
+
     analise_ia = avaliar_com_ia(dados)
     alerts.mostrar_alerta(dados, analise_ia)
     tentar_comprar(dados, analise_ia)
+
+    # Se esta posicao foi comprada pelo sniper rapido e a IA (que so
+    # chega agora) considerar o token mau, vende de imediato - a 2a
+    # camada de protecao deste modo, depois da compra em vez de antes.
+    vender_sniper_se_score_mau(dados, analise_ia)
 
     # Regista o token no radar (radar.json), comprado ou nao - e isto
     # que alimenta a seccao "Radar ao vivo" do dashboard. Se a posicao

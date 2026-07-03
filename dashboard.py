@@ -349,6 +349,7 @@ def api_posicoes():
             "timestamp_compra": p.get("timestamp_compra"),
             "dry_run": p.get("dry_run", True),
             "origem": p.get("origem"),  # "bonding_curve" ou None (compra normal)
+            "sniper_rapido": bool(p.get("sniper_rapido", False)),
             "chain": p.get("chain", "solana"),  # "solana" ou "bsc"
             # Acompanhamento automatico ligado? (defeito True; False = so manual)
             "gestao_automatica": p.get("gestao_automatica", True),
@@ -815,6 +816,43 @@ def api_pumpfun_toggle():
         }), 400
 
     _escrever_bool_no_env("PUMPFUN_BONDING_CURVE_ATIVO", ativar)
+    a_correr, _ = _estado_bot()
+    return jsonify({"ok": True, "ativo": ativar, "precisa_reiniciar": a_correr})
+
+
+@app.route("/api/sniper")
+def api_sniper():
+    """Estado do Modo Sniper Rapido (o mais arriscado dos 3 modos de
+    compra) + quanto ja gastou hoje do limite diario obrigatorio."""
+    import sniper_rapido
+    return jsonify({
+        "ativo": _ler_bool_do_env("SNIPER_RAPIDO_ATIVO", False),
+        "valor_usd": config.SNIPER_RAPIDO_VALOR_USD,
+        "score_max": config.SNIPER_RAPIDO_SCORE_MAX,
+        "limite_diario_usd": config.SNIPER_RAPIDO_LIMITE_DIARIO_USD,
+        "gasto_hoje_usd": round(sniper_rapido.gasto_hoje_usd(), 2),
+        "restante_hoje_usd": round(sniper_rapido.restante_hoje_usd(), 2),
+    })
+
+
+@app.route("/api/sniper", methods=["POST"])
+def api_sniper_toggle():
+    """Liga/desliga o Modo Sniper Rapido. Ligar exige SEMPRE a palavra
+    CONFIRMO no pedido - a validacao final vive aqui no backend, mesmo
+    que o frontend peca uma confirmacao dupla em modo REAL (o mesmo
+    padrao usado para mudar de SIMULADO para REAL). Desligar e livre."""
+    corpo = request.get_json(silent=True) or {}
+    if "ativo" not in corpo:
+        return jsonify({"ok": False, "erro": "Pedido inválido: falta 'ativo'."}), 400
+    ativar = bool(corpo["ativo"])
+
+    if ativar and corpo.get("confirmacao") != "CONFIRMO":
+        return jsonify({
+            "ok": False,
+            "erro": "Ativar o Modo Sniper Rápido exige escrever CONFIRMO — é o modo mais arriscado do bot.",
+        }), 400
+
+    _escrever_bool_no_env("SNIPER_RAPIDO_ATIVO", ativar)
     a_correr, _ = _estado_bot()
     return jsonify({"ok": True, "ativo": ativar, "precisa_reiniciar": a_correr})
 

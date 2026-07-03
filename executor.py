@@ -178,6 +178,7 @@ def vender_token(mint: str, percentagem: float) -> dict:
             preco_compra_usd=posicao.get("preco_compra_usd"),
             preco_venda_usd=preco_venda_usd,
             quantidade_tokens=quantidade_a_vender,
+            sniper_rapido=bool(posicao.get("sniper_rapido", False)),
         )
         if not aplicado:
             # Rejeitado pela verificacao de sanidade (cotacao absurda) -

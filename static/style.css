@@ -171,6 +171,26 @@ h1 .subtitulo { color: var(--accent); font-weight: 600; font-size: 0.7rem; lette
 .switch-curva input:checked + .switch-visual::after { transform: translateX(17px); background: var(--amarelo); }
 .aviso-curva { color: var(--amarelo); font-size: 0.72rem; font-weight: 600; }
 
+/* --- Toggle do Modo Sniper Rapido (mais arriscado - vermelho, nao ambar) --- */
+.linha-sniper { padding-top: 0; }
+#chk-sniper:checked + .switch-visual { background: rgba(255, 92, 122, 0.3); border-color: var(--vermelho); }
+#chk-sniper:checked + .switch-visual::after { transform: translateX(17px); background: var(--vermelho); }
+#aviso-sniper { color: var(--vermelho); }
+
+/* Barra do limite diario gasto pelo Modo Sniper Rapido */
+.linha-sniper-orcamento { padding-top: 0; }
+.orcamento-sniper { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.orcamento-barra {
+  height: 6px; border-radius: 999px; background: var(--fundo-elevado);
+  border: 1px solid var(--linha-grelha); overflow: hidden;
+}
+.orcamento-preenchido {
+  height: 100%; width: 0%; background: var(--vermelho);
+  transition: width 0.3s ease;
+}
+.orcamento-preenchido.cheio { background: #ff2f4f; }  /* mais vivo perto do limite */
+.orcamento-texto { font-size: 0.68rem; color: var(--texto-mudo); }
+
 /* --- Indicador de estado do bot (bolinha + texto) --- */
 .estado-bot {
   display: flex;
@@ -443,6 +463,7 @@ tr:last-child td { border-bottom: none; }
 .tag.comprado { background: rgba(139, 124, 246, 0.18); color: var(--accent); }
 .tag.curva    { background: rgba(250, 178, 25, 0.16);  color: var(--amarelo); }
 .tag.manual   { background: rgba(125, 133, 144, 0.2);  color: var(--texto-suave); }
+.tag.sniper   { background: rgba(255, 92, 122, 0.16);  color: var(--vermelho); }
 /* Etiquetas de rede: Solana (roxo) e BSC (amarelo BNB) */
 .tag.chain-solana { background: rgba(139, 124, 246, 0.15); color: var(--accent); font-size: 0.6rem; padding: 2px 6px; }
 .tag.chain-bsc    { background: rgba(243, 186, 47, 0.16);  color: #f3ba2f; font-size: 0.6rem; padding: 2px 6px; }
@@ -547,6 +568,11 @@ tr:last-child td { border-bottom: none; }
 }
 .link-token:hover { color: var(--accent); }
 
+/* Preco cortado por ser numero minusculo demais (ex: $0.0000000000…):
+   hover mostra o valor completo (title nativo), clique copia-o */
+.preco-truncado { cursor: pointer; border-bottom: 1px dotted var(--texto-mudo); }
+.preco-truncado:hover { color: var(--accent); }
+
 /* Estado da liquidez na watchlist (reavaliado pelo bot a cada ciclo) */
 .estado-liq { color: var(--texto-mudo); font-size: 0.72rem; font-family: var(--fonte-texto); }
 .estado-liq.viva  { color: var(--verde); }
@@ -577,8 +603,11 @@ tr:last-child td { border-bottom: none; }
 /* Historico mais compacto (item 2): menos padding e fonte menor nas celulas */
 #tabela-historico td { padding: 6px 8px; font-size: 0.74rem; }
 
-/* Botoes de acao das posicoes: quebram para varias linhas sem esticar */
-.acoes-posicao { display: flex; gap: 5px; flex-wrap: wrap; }
+/* Botoes de acao das posicoes: SEMPRE lado a lado, nunca empilhados -
+   nowrap forca tudo numa so linha (a tabela ja tem scroll horizontal
+   proprio, por isso nao ha problema em a linha ficar larga) */
+.acoes-posicao { display: flex; gap: 4px; flex-wrap: nowrap; white-space: nowrap; }
+.acoes-posicao .btn { flex-shrink: 0; }  /* nenhum botao encolhe/quebra texto */
 
 /* ==========================================================================
    ESTADOS VAZIOS (icone grande + mensagem amigavel)
