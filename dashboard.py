@@ -349,6 +349,7 @@ def api_posicoes():
             "timestamp_compra": p.get("timestamp_compra"),
             "dry_run": p.get("dry_run", True),
             "origem": p.get("origem"),  # "bonding_curve" ou None (compra normal)
+            "chain": p.get("chain", "solana"),  # "solana" ou "bsc"
             "valor_atual_usd": round(valor_atual, 2) if valor_atual is not None else None,
             "lucro_nao_realizado_usd": lucro_nao_realizado,
         })
@@ -390,6 +391,8 @@ def api_bot_status():
         # Pre-requisitos (o frontend desativa botoes conforme isto)
         "camada1_ok": config.camada1_configurada(),
         "fase2_ok": config.fase2_configurada(),
+        # Multi-chain: redes ativas (para o badge e o filtro do dashboard)
+        "redes_ativas": config.REDES_ATIVAS,
     })
 
 

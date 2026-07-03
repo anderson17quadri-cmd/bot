@@ -146,6 +146,36 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
     return True  # tratado pelo caminho da curva, nao cai no fluxo normal
 
 
+def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
+    """Compra na BSC (via PancakeSwap), o equivalente ao tentar_comprar da
+    Solana. Precisa da wallet BSC configurada; usa o limite BSC_MAX_TRADE_USD.
+    Nunca deixa uma falha derrubar o bot."""
+    if not config.fase2_bsc_configurada():
+        return  # sem WALLET_PRIVATE_KEY_BSC, trading BSC desligado
+
+    score = analise_ia["score_final"]
+    if score > config.SCORE_COMPRA_MAX:
+        return
+
+    mint = dados["token_mint"]
+    simbolo = dados["token_simbolo"]
+    if mint in posicoes.listar_posicoes_abertas():
+        return
+
+    if config.DRY_RUN:
+        import carteira
+        if carteira.saldo_disponivel() < config.BSC_MAX_TRADE_USD:
+            return
+
+    try:
+        import executor_bsc
+        r = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD)
+        cor = "green" if r.get("sucesso") else "yellow"
+        alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
+    except Exception as e:
+        alerts.info(f"[red]Falha na compra BSC de {simbolo}:[/red] {e}")
+
+
 def tentar_comprar(dados: dict, analise_ia: dict) -> None:
     """Se o score final for suficientemente baixo (seguro), tenta comprar
     (real ou simulado, consoante config.DRY_RUN). Nunca deixa uma falha
@@ -153,10 +183,9 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
     if not config.fase2_configurada():
         return  # sem wallet configurada, Fase 2 desligada
 
-    # BSC: a execucao (PancakeSwap) e a fase B3 - ainda nao implementada.
-    # Ate la, os tokens BSC entram no fluxo so ate ao alerta/radar/watchlist,
-    # nunca sao comprados (o executor da Solana nao serve para EVM).
+    # BSC: caminho de execucao proprio (PancakeSwap), separado da Solana
     if dados.get("chain") == "bsc":
+        tentar_comprar_bsc(dados, analise_ia)
         return
 
     # Se o token e do pump.fun e o modo curva esta ligado, esse caminho

@@ -14,3 +14,8 @@ rich>=13.7            # imprimir alertas bonitos e legiveis na consola
 # ============================================================
 flask>=3.0            # servidor web do dashboard (localhost:5000)
 qrcode>=7.4           # QR code do endereco da wallet (pure-Python, SVG sem pillow)
+
+# ============================================================
+# BSC (Parte B) - assinatura de transacoes Ethereum, pure-Python
+# ============================================================
+eth-account>=0.11   # assinar swaps na PancakeSwap sem web3.py completo

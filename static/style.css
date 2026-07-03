@@ -442,6 +442,19 @@ tr:last-child td { border-bottom: none; }
 .tag.venda    { background: rgba(46, 224, 111, 0.13);  color: var(--verde); }
 .tag.comprado { background: rgba(139, 124, 246, 0.18); color: var(--accent); }
 .tag.curva    { background: rgba(250, 178, 25, 0.16);  color: var(--amarelo); }
+/* Etiquetas de rede: Solana (roxo) e BSC (amarelo BNB) */
+.tag.chain-solana { background: rgba(139, 124, 246, 0.15); color: var(--accent); font-size: 0.6rem; padding: 2px 6px; }
+.tag.chain-bsc    { background: rgba(243, 186, 47, 0.16);  color: #f3ba2f; font-size: 0.6rem; padding: 2px 6px; }
+
+/* Filtro de chain (chips no topo do conteudo) */
+.linha-atualizacao { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.filtro-chain { display: flex; gap: 4px; background: var(--fundo-elevado); border: 1px solid var(--linha-grelha); border-radius: 999px; padding: 3px; }
+.chip-chain {
+  border: none; background: transparent; color: var(--texto-mudo);
+  font-family: var(--fonte-texto); font-size: 0.72rem; font-weight: 700;
+  padding: 4px 12px; border-radius: 999px; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.chip-chain.ativo { background: rgba(139, 124, 246, 0.2); color: var(--accent); }
 
 /* Pastilha colorida do score no radar:
    verde = seguro (<30), amarelo = medio (30-60), vermelho = arriscado (>60) */

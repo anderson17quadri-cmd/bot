@@ -109,8 +109,25 @@ CHAINS = {
     },
 }
 
-# RPC da BSC (so leitura para B1/B2; execucao real vem no B3)
+# RPC da BSC (leitura + envio de transacoes)
 BSC_RPC_URL = _env_texto("BSC_RPC_URL", "https://bsc-dataseed.binance.org")
+BSC_CHAIN_ID = 56  # id da rede BSC (usado ao assinar transacoes)
+
+# Router da PancakeSwap V2 (o AMM mais usado na BSC)
+PANCAKE_ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+
+# Wallet BSC (formato Ethereum 0x...) - SEPARADA da Solana, nunca a mesma chave
+WALLET_PRIVATE_KEY_BSC = _env_texto("WALLET_PRIVATE_KEY_BSC")
+# Limite por trade na BSC, independente da Solana (mas o mesmo default $5)
+BSC_MAX_TRADE_USD = _env_float("BSC_MAX_TRADE_USD", 5.0)
+# Trava final do envio real na BSC (como no pump.fun): mesmo com
+# DRY_RUN=false, so envia on-chain se isto for true. O construtor da
+# transacao foi escrito e simulado, mas NAO validado com um swap real.
+BSC_PERMITIR_ENVIO_REAL = _env_texto("BSC_PERMITIR_ENVIO_REAL", "false").lower() in ("1", "true", "yes", "sim")
+
+
+def fase2_bsc_configurada() -> bool:
+    return bool(WALLET_PRIVATE_KEY_BSC)
 
 
 # ==========================================================================

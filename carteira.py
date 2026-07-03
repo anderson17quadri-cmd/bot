@@ -61,7 +61,8 @@ def saldo_disponivel() -> float:
 
 def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
                     preco_unitario_usd: float | None = None,
-                    quantidade_tokens: float | None = None) -> bool:
+                    quantidade_tokens: float | None = None,
+                    chain: str = "solana") -> bool:
     """Debita o valor da compra do saldo virtual. Devolve False (e nao
     debita nada) se nao houver saldo suficiente.
 
@@ -77,7 +78,7 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
     dados["saldo_atual_usd"] -= valor_usd
     dados["historico"].append({
         "tipo": "compra", "simbolo": simbolo, "valor_usd": valor_usd,
-        "mint": mint,
+        "mint": mint, "chain": chain,
         "preco_unitario_usd": preco_unitario_usd,
         "quantidade_tokens": quantidade_tokens,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -90,7 +91,8 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
                    mint: str | None = None,
                    preco_compra_usd: float | None = None,
                    preco_venda_usd: float | None = None,
-                   quantidade_tokens: float | None = None) -> None:
+                   quantidade_tokens: float | None = None,
+                   chain: str = "solana") -> None:
     """Credita o valor recebido da venda no saldo virtual e regista o
     lucro/prejuizo realizado dessa operacao.
 
@@ -104,7 +106,7 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
     dados["historico"].append({
         "tipo": "venda", "simbolo": simbolo,
         "valor_usd": valor_recebido_usd, "lucro_usd": round(lucro, 4),
-        "mint": mint,
+        "mint": mint, "chain": chain,
         "preco_compra_usd": preco_compra_usd,
         "preco_venda_usd": preco_venda_usd,
         "quantidade_tokens": quantidade_tokens,

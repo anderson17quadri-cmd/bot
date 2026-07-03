@@ -100,16 +100,32 @@ function alternarVazio(canvas, idMensagem, temDados) {
   el(idMensagem).hidden = temDados;
 }
 
+// Filtro de chain ativo no dashboard ("todas" | "solana" | "bsc").
+// O polling filtra as tabelas por este valor, sem novo pedido ao servidor.
+let filtroChain = "todas";
+
+/** True se um registo (com campo .chain) deve aparecer com o filtro atual */
+function passaFiltroChain(item) {
+  if (filtroChain === "todas") return true;
+  return (item.chain || "solana") === filtroChain;
+}
+
+/** Etiqueta pequena da rede, ao lado do simbolo nas tabelas */
+function tagChain(chain) {
+  const c = chain || "solana";
+  return ` <span class="tag chain-${c}">${c === "bsc" ? "BSC" : "SOL"}</span>`;
+}
+
 /** Simbolo clicavel: abre o grafico do token num novo separador.
-    DexScreener funciona para tudo; para pump.fun linka a propria pagina.
-    Sem mint (registos antigos do historico) -> devolve so o texto. */
-function linkToken(mint, simbolo, dex = "") {
+    DexScreener usa /solana/ ou /bsc/ conforme a chain; para pump.fun
+    linka a propria pagina. Sem mint -> devolve so o texto. */
+function linkToken(mint, simbolo, dex = "", chain = "solana") {
   const nome = simbolo || "?";
   if (!mint) return nome;
   const ePumpFun = (dex || "").toLowerCase().includes("pump");
-  const url = ePumpFun
-    ? `https://pump.fun/${mint}`
-    : `https://dexscreener.com/solana/${mint}`;
+  let url;
+  if (ePumpFun) url = `https://pump.fun/${mint}`;
+  else url = `https://dexscreener.com/${chain || "solana"}/${mint}`;
   // rel="noopener": impede a pagina aberta de controlar o dashboard
   return `<a class="link-token" href="${url}" target="_blank" rel="noopener">${nome} ↗</a>`;
 }
@@ -324,6 +340,18 @@ el("btn-reiniciar").addEventListener("click", async () => {
   await atualizarStatus();
 });
 
+// --- Filtro de chain (chips Todas / Solana / BSC) ---
+// Delegacao: um listener trata os tres chips. Muda o filtro e re-desenha
+// tudo de imediato (sem esperar pelo proximo polling).
+document.getElementById("filtro-chain").addEventListener("click", (evento) => {
+  const chip = evento.target.closest(".chip-chain");
+  if (!chip) return;
+  filtroChain = chip.dataset.chain;
+  document.querySelectorAll(".chip-chain").forEach((c) => c.classList.remove("ativo"));
+  chip.classList.add("ativo");
+  atualizarTudo();
+});
+
 // --- Toggle da bonding curve (experimental, com confirmacao CONFIRMO) ---
 async function atualizarCurva() {
   const dados = await (await fetch("/api/pumpfun")).json();
@@ -449,6 +477,15 @@ async function atualizarStatus() {
     }
   }
 
+  // --- Multi-chain: badge da chain e filtro so aparecem com >1 rede ---
+  const redes = estadoBot.redes_ativas || ["solana"];
+  const badge = el("badge-chain");
+  if (badge) {
+    if (redes.length > 1) badge.textContent = "MULTI-CHAIN";
+    else badge.textContent = redes[0] === "bsc" ? "BSC" : "SOLANA";
+  }
+  el("filtro-chain").hidden = redes.length <= 1;
+
   // --- Seletor SIMULADO/REAL reflete o .env ATUAL ---
   el("btn-modo-simulado").className =
     "segmento" + (estadoBot.dry_run_env ? " ativo-simulado" : "");
@@ -566,8 +603,9 @@ async function atualizarResumo() {
   graficoVelas.update();
 
   // --- Tabela de historico (mais recente primeiro, ja vem ordenada) ---
-  el("vazio-historico").hidden = dados.historico.length > 0;
-  el("tabela-historico").innerHTML = dados.historico.map((h) => {
+  const histVisivel = dados.historico.filter(passaFiltroChain);
+  el("vazio-historico").hidden = histVisivel.length > 0;
+  el("tabela-historico").innerHTML = histVisivel.map((h) => {
     const eVenda = h.tipo === "venda";
     // So as vendas tem lucro; nas compras a celula fica vazia
     let celulaLucro = "<td>–</td>";
@@ -582,7 +620,7 @@ async function atualizarResumo() {
     return `<tr>
       <td>${dataHora(h.timestamp)}</td>
       <td><span class="tag ${eVenda ? "venda" : "compra"}">${eVenda ? "VENDA" : "COMPRA"}</span></td>
-      <td>${linkToken(h.mint, h.simbolo)}</td>
+      <td>${linkToken(h.mint, h.simbolo, "", h.chain)}${tagChain(h.chain)}</td>
       <td>${dinheiro(h.valor_usd)}</td>
       <td>${precoUnitario(precoCompra)}</td>
       <td>${eVenda ? precoUnitario(h.preco_venda_usd) : "–"}</td>
@@ -597,8 +635,9 @@ async function atualizarPosicoes() {
   const dados = await resposta.json();
   const posicoes = dados.posicoes;
 
-  el("vazio-posicoes").hidden = posicoes.length > 0;
-  el("tabela-posicoes").innerHTML = posicoes.map((p) => {
+  const posVisiveis = posicoes.filter(passaFiltroChain);
+  el("vazio-posicoes").hidden = posVisiveis.length > 0;
+  el("tabela-posicoes").innerHTML = posVisiveis.map((p) => {
     // P/L nao realizado: pode ser null se a cotacao Jupiter falhou
     let celulaPL = "<td>N/A</td>";
     if (p.lucro_nao_realizado_usd !== null) {
@@ -610,7 +649,7 @@ async function atualizarPosicoes() {
       ? ' <span class="tag curva">BONDING CURVE</span>' : "";
 
     return `<tr>
-      <td>${linkToken(p.mint, p.simbolo, p.dex)}${tagCurva}</td>
+      <td>${linkToken(p.mint, p.simbolo, p.dex, p.chain)}${tagChain(p.chain)}${tagCurva}</td>
       <td>${dinheiro(p.valor_investido_usd)}</td>
       <td>$${p.preco_compra_usd.toPrecision(4)}</td>
       <td>${p.quantidade_tokens.toLocaleString("pt-PT", { maximumFractionDigits: 0 })}</td>
@@ -631,8 +670,9 @@ async function atualizarWatchlist() {
   const dados = await resposta.json();
   const lista = dados.watchlist;
 
-  el("vazio-watchlist").hidden = lista.length > 0;
-  el("tabela-watchlist").innerHTML = lista.map((w) => {
+  const wVisiveis = lista.filter(passaFiltroChain);
+  el("vazio-watchlist").hidden = wVisiveis.length > 0;
+  el("tabela-watchlist").innerHTML = wVisiveis.map((w) => {
     // Estado da reavaliacao periodica feita pelo bot
     let estado = '<span class="estado-liq">por avaliar</span>';
     if (w.reavaliacao) {
@@ -644,7 +684,7 @@ async function atualizarWatchlist() {
     const seguido = !!w.seguido;
 
     return `<tr>
-      <td>${linkToken(w.mint, w.simbolo, w.dex)}</td>
+      <td>${linkToken(w.mint, w.simbolo, w.dex, w.chain)}${tagChain(w.chain)}</td>
       <td><span class="pastilha ${w.score < 30 ? "score-baixo" : w.score <= 60 ? "score-medio" : "score-alto"}">${w.score}</span></td>
       <td>${conf}</td>
       <td>${dinheiro(w.liquidez_usd)}</td>
@@ -668,8 +708,9 @@ async function atualizarRadar() {
   const dados = await resposta.json();
   const radar = dados.radar;
 
-  el("vazio-radar").hidden = radar.length > 0;
-  el("tabela-radar").innerHTML = radar.map((r) => {
+  const visiveis = radar.filter(passaFiltroChain);
+  el("vazio-radar").hidden = visiveis.length > 0;
+  el("tabela-radar").innerHTML = visiveis.map((r) => {
     // Cor do score: verde = seguro, amarelo = medio, vermelho = arriscado
     let classeScore = "score-alto";
     if (r.score < 30) classeScore = "score-baixo";
@@ -680,7 +721,7 @@ async function atualizarRadar() {
     const tagComprado = r.comprado ? ' <span class="tag comprado">COMPRADO</span>' : "";
 
     return `<tr>
-      <td>${linkToken(r.mint, r.simbolo, r.dex)}${tagComprado}</td>
+      <td>${linkToken(r.mint, r.simbolo, r.dex, r.chain)}${tagChain(r.chain)}${tagComprado}</td>
       <td><span class="pastilha ${classeScore}">${r.score}</span></td>
       <td>${dinheiro(r.liquidez_usd)}</td>
       <td>${r.dex || "?"}</td>

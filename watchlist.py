@@ -95,6 +95,7 @@ def adicionar(dados: dict, analise_ia: dict) -> None:
         registos.insert(0, {
             "mint": mint,
             "simbolo": dados.get("token_simbolo", "?"),
+            "chain": dados.get("chain", "solana"),
             "dex": dados.get("dex", "?"),
             "score": analise_ia.get("score_final", 0),
             "confianca": camada1.get("confianca"),

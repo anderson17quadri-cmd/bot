@@ -55,7 +55,7 @@
     <div class="topo-linha">
       <h1>
         <svg class="icone logo" viewBox="0 0 24 24"><use href="#i-alvo"/></svg>
-        Sniper Bot <span class="subtitulo">SOLANA</span>
+        Sniper Bot <span class="subtitulo" id="badge-chain">SOLANA</span>
       </h1>
 
       <!-- Toggle SIMULADO/REAL: controlo segmentado que mostra o modo
@@ -99,8 +99,17 @@
   <div class="toast" id="toast" hidden></div>
 
   <main>
-    <!-- Ultima atualizacao (o polling escreve aqui a hora de cada refresh) -->
-    <p id="ultima-atualizacao" class="atualizacao">a ligar ao bot…</p>
+    <!-- Ultima atualizacao + filtro de chain (multi-chain) -->
+    <div class="linha-atualizacao">
+      <p id="ultima-atualizacao" class="atualizacao">a ligar ao bot…</p>
+      <!-- Filtro Solana / BSC / Ambas: so aparece se houver mais de uma
+           rede ativa (senao nao faz sentido filtrar) -->
+      <div class="filtro-chain" id="filtro-chain" hidden role="group" aria-label="Filtrar por rede">
+        <button class="chip-chain ativo" data-chain="todas">Todas</button>
+        <button class="chip-chain" data-chain="solana">Solana</button>
+        <button class="chip-chain" data-chain="bsc">BSC</button>
+      </div>
+    </div>
 
     <!-- ================= 1. CARTOES DE RESUMO ================= -->
     <section class="cartoes">
