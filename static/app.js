@@ -411,6 +411,23 @@ document.getElementById("filtro-chain").addEventListener("click", (evento) => {
   atualizarTudo();
 });
 
+// --- Resetar bot (limpar dados de teste, so em modo SIMULADO) ---
+el("btn-abrir-resetar").addEventListener("click", () => {
+  el("input-resetar-confirmo").value = "";
+  el("btn-resetar-confirmar").disabled = true;
+  abrirModal("modal-resetar");
+});
+el("input-resetar-confirmo").addEventListener("input", () => {
+  el("btn-resetar-confirmar").disabled = el("input-resetar-confirmo").value.trim() !== "RESETAR";
+});
+el("btn-resetar-confirmar").addEventListener("click", async () => {
+  const r = await pedirAcao("/api/resetar", { confirmacao: el("input-resetar-confirmo").value.trim() });
+  fecharModais();
+  if (r.ok) toast(`Bot resetado — saldo reposto a $${r.saldo_inicial}.`, "sucesso");
+  else toast(r.erro || "Não foi possível resetar.", "erro");
+  atualizarTudo();
+});
+
 // --- Toggle da bonding curve (experimental, com confirmacao CONFIRMO) ---
 async function atualizarCurva() {
   const dados = await (await fetch("/api/pumpfun")).json();

@@ -131,9 +131,12 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float) -> dict:
     if tokens_estimados <= 0:
         return {"sucesso": False, "dry_run": config.DRY_RUN, "mensagem": "[BSC] sem rota de troca para este token."}
 
-    # Preco por token em USD (para o historico/posicoes). Os tokens BSC
-    # tem tipicamente 18 decimais; usamos isso como convencao aqui.
-    preco_unit_usd = teto / (tokens_estimados / 1e18) if tokens_estimados else 0
+    # IMPORTANTE (bug corrigido): 'quantidade_tokens' guarda-se sempre em
+    # unidades MINIMAS/raw (tokens_estimados, tal como veio do router) -
+    # o preco tem de ser por unidade minima tambem, senao desalinha com a
+    # quantidade e os calculos de stop-loss/take-profit ficam errados por
+    # um fator de 1e18 (os decimais do token). NUNCA dividir por 1e18 aqui.
+    preco_unit_usd = teto / tokens_estimados if tokens_estimados else 0
 
     # ---------------- DRY-RUN ----------------
     if config.DRY_RUN:
@@ -252,16 +255,23 @@ def vender_token(mint: str, percentagem: float) -> dict:
 
     # Proporcao do investido correspondente a esta venda (para o lucro)
     investido_proporcional = pos.get("valor_investido_usd", 0) * (percentagem / 100.0)
-    preco_venda_usd = valor_recebido_usd / (quantidade_a_vender / 1e18) if quantidade_a_vender else None
+    # Preco por unidade MINIMA (raw) - mesma convencao de quantidade_a_vender,
+    # NUNCA dividir por 1e18 aqui (era o bug: desalinhava com a quantidade)
+    preco_venda_usd = valor_recebido_usd / quantidade_a_vender if quantidade_a_vender else None
 
     # ---------------- DRY-RUN ----------------
     if config.DRY_RUN:
         import carteira
-        carteira.registar_venda(
+        aplicado = carteira.registar_venda(
             pos["simbolo"], valor_recebido_usd, investido_proporcional, mint=mint,
             preco_compra_usd=pos.get("preco_compra_usd"), preco_venda_usd=preco_venda_usd,
             quantidade_tokens=quantidade_a_vender, chain="bsc",
         )
+        if not aplicado:
+            # Rejeitado pela verificacao de sanidade - posicao mantida aberta
+            return {"sucesso": False, "dry_run": True, "chain": "bsc",
+                    "mensagem": (f"[SIMULADO][BSC] Venda de {pos['simbolo']} rejeitada: "
+                                 f"cotacao anormal (${valor_recebido_usd:,.2f}). Posição mantida aberta.")}
         _fechar_ou_reduzir(mint, pos, quantidade_a_vender, percentagem)
         return {"sucesso": True, "dry_run": True, "chain": "bsc",
                 "mensagem": (f"[SIMULADO][BSC] Vendido {percentagem:.0f}% de {pos['simbolo']} "
@@ -341,12 +351,11 @@ def _vender_real(mint, pos, quantidade, percentagem, bnb_wei, valor_recebido_usd
         )
         tx_hash = _enviar_tx(conta, {"to": router, "value": 0, "data": "0x" + dados_swap.hex()})
 
-        import carteira
-        carteira.registar_venda(
-            pos["simbolo"], valor_recebido_usd, investido_proporcional, mint=mint,
-            preco_compra_usd=pos.get("preco_compra_usd"), preco_venda_usd=preco_venda_usd,
-            quantidade_tokens=quantidade, chain="bsc",
-        )
+        # NOTA: ao contrario do dry-run, o modo REAL nao mexe no carteira.json
+        # (esse ficheiro e so a carteira VIRTUAL de simulacao - o dinheiro
+        # real esta na wallet on-chain, nao aqui). Isto tambem corrige uma
+        # inconsistencia: as compras reais nunca tocaram no carteira.json,
+        # mas esta venda real tocava - agora ambas se comportam da mesma forma.
         _fechar_ou_reduzir(mint, pos, quantidade, percentagem)
         return {"sucesso": True, "dry_run": False, "chain": "bsc", "assinatura": tx_hash,
                 "mensagem": f"[BSC] Vendido {percentagem:.0f}% de {pos['simbolo']} - tx {tx_hash[:12]}..."}

@@ -210,8 +210,52 @@ PUMPFUN_ATRASO_MINIMO_SEGUNDOS = _env_int("PUMPFUN_ATRASO_MINIMO_SEGUNDOS", 45)
 PUMPFUN_PERMITIR_ENVIO_REAL = _env_texto("PUMPFUN_PERMITIR_ENVIO_REAL", "false").lower() in ("1", "true", "yes", "sim")
 
 
+# ==========================================================================
+# 7c) MODO SNIPER RAPIDO ("modo caveira") - O MAIS ARRISCADO DE TODOS
+# ==========================================================================
+# Compra quase instantanea assim que um token e detetado, usando SO as
+# verificacoes on-chain rapidas que ja existem (mint/freeze authority,
+# liquidez minima) - SEM esperar pela analise da DeepSeek. Aceita scores
+# heuristicos muito mais altos (ate 50, contra 20 do modo normal) porque
+# prioriza velocidade sobre seguranca: o objetivo e apanhar os poucos
+# tokens que disparam nos primeiros segundos, aceitando que a maioria das
+# compras deste modo vai dar prejuizo pequeno (e o "custo de entrada").
+# A analise completa (DeepSeek) continua a correr por tras; se vier um
+# score mau para uma posicao comprada por este modo, ela e vendida de
+# imediato (a IA funciona aqui como uma 2a camada de protecao, depois
+# da compra em vez de antes).
+#
+# Desligado por defeito, SEMPRE. O limite diario e OBRIGATORIO (nao best
+# effort) - existe precisamente para conter o dano maximo possivel se o
+# modo ficar ligado durante um dia mau.
+SNIPER_RAPIDO_ATIVO = _env_texto("SNIPER_RAPIDO_ATIVO", "false").lower() in ("1", "true", "yes", "sim")
+SNIPER_RAPIDO_VALOR_USD = _env_float("SNIPER_RAPIDO_VALOR_USD", 1.0)       # compra minuscula, so este modo
+SNIPER_RAPIDO_SCORE_MAX = _env_int("SNIPER_RAPIDO_SCORE_MAX", 50)         # so heuristico, sem IA
+SNIPER_RAPIDO_LIMITE_DIARIO_USD = _env_float("SNIPER_RAPIDO_LIMITE_DIARIO_USD", 10.0)
+# Se a DeepSeek (depois de a posicao ja estar comprada) devolver um score
+# acima disto, vende-se imediatamente - protecao a posteriori
+SNIPER_RAPIDO_SCORE_VENDA_URGENTE = _env_int("SNIPER_RAPIDO_SCORE_VENDA_URGENTE", 70)
+
+
 def fase2_configurada() -> bool:
     return bool(WALLET_PRIVATE_KEY)
+
+
+def limite_sanidade_trade_usd() -> float:
+    """Limite de seguranca usado por carteira.py: REJEITA qualquer
+    alteracao de saldo (compra ou venda) maior do que isto, mesmo em
+    modo simulado. Protege contra bugs de unidades (ex: quantidade de
+    tokens, um numero na casa dos milhares de milhoes, usada por engano
+    como se fosse valor em USD) - o tipo de bug que ja aconteceu aqui.
+
+    E deliberadamente generoso (50x o maior limite de trade configurado
+    entre os 3 modos de compra) para NUNCA bloquear uma venda legitima
+    com lucro grande - so existe para apanhar corrupcoes de ordens de
+    grandeza, nao para policiar o dia a dia normal do bot."""
+    maiores_limites = [
+        MAX_TRADE_USD, PUMPFUN_MAX_TRADE_USD, BSC_MAX_TRADE_USD, SNIPER_RAPIDO_VALOR_USD,
+    ]
+    return max(maiores_limites) * 50
 
 
 # ==========================================================================

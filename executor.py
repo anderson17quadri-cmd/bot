@@ -172,13 +172,24 @@ def vender_token(mint: str, percentagem: float) -> dict:
         preco_venda_usd = (
             valor_recebido_usd / quantidade_a_vender if quantidade_a_vender else None
         )
-        carteira.registar_venda(
+        aplicado = carteira.registar_venda(
             posicao["simbolo"], valor_recebido_usd, valor_investido_proporcional,
             mint=mint,
             preco_compra_usd=posicao.get("preco_compra_usd"),
             preco_venda_usd=preco_venda_usd,
             quantidade_tokens=quantidade_a_vender,
         )
+        if not aplicado:
+            # Rejeitado pela verificacao de sanidade (cotacao absurda) -
+            # o "dinheiro" simulado nunca entrou, por isso a posicao
+            # NAO e fechada nem reduzida (fica intacta para tentar depois)
+            return {
+                "sucesso": False, "dry_run": True,
+                "mensagem": (
+                    f"[SIMULADO] Venda de {posicao['simbolo']} rejeitada: cotacao "
+                    f"anormal (${valor_recebido_usd:,.2f}). Posicao mantida aberta."
+                ),
+            }
         resultado = {
             "sucesso": True, "dry_run": True,
             "mensagem": (
@@ -194,7 +205,8 @@ def vender_token(mint: str, percentagem: float) -> dict:
             "mensagem": f"Vendido {percentagem}% de {posicao['simbolo']} - tx {assinatura[:12]}...",
         }
 
-    # Atualiza/fecha a posicao consoante a percentagem vendida
+    # Atualiza/fecha a posicao consoante a percentagem vendida (so chega
+    # aqui se a venda foi mesmo aplicada - ver o "return" acima)
     if percentagem >= 100:
         posicoes.fechar_posicao(mint)
     else:

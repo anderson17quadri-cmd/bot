@@ -260,8 +260,10 @@ def verificar_posicoes() -> None:
                 valor_atual_usd = executor_bsc.valor_atual_usd(mint, quantidade)
                 if valor_atual_usd is None:
                     raise RuntimeError("sem rota de venda na PancakeSwap")
-                # preco por unidade minima (mesma convencao de compra BSC: 1e18)
-                preco_atual = valor_atual_usd / (quantidade / 1e18) if quantidade else 0
+                # preco por unidade MINIMA (raw) - a mesma convencao agora
+                # usada em preco_compra_usd (bug corrigido: era por token
+                # inteiro, desalinhado com 'quantidade' que e sempre raw)
+                preco_atual = valor_atual_usd / quantidade if quantidade else 0
             else:
                 # Solana: cotacao do token -> USDC, dividido pela quantidade
                 cot = executor._obter_cotacao(

@@ -59,18 +59,44 @@ def saldo_disponivel() -> float:
     return _carregar()["saldo_atual_usd"]
 
 
+def _sanidade_ok(valor_usd: float, operacao: str, simbolo: str) -> bool:
+    """Rede de seguranca contra bugs de unidades (ex: uma quantidade de
+    tokens - um numero na casa dos milhares de milhoes - usada por engano
+    como se fosse valor em USD). Ja aconteceu: saldo simulado saltou de
+    $200 para $212,009 numa unica operacao.
+
+    Rejeita QUALQUER compra/venda cujo valor absoluto exceda
+    config.limite_sanidade_trade_usd() (por defeito, 50x o maior limite
+    de trade configurado entre os 3 modos - generoso, so apanha
+    corrupcoes de ordens de grandeza, nunca trades legitimos)."""
+    limite = config.limite_sanidade_trade_usd()
+    if abs(valor_usd) <= limite:
+        return True
+    print(
+        f"[carteira] ERRO DE SANIDADE: {operacao} de {simbolo} rejeitada - "
+        f"valor ${valor_usd:,.2f} excede o limite de seguranca (${limite:,.2f}, "
+        f"50x o maior MAX_TRADE_USD configurado). Isto cheira a bug de unidades "
+        f"(preco/quantidade trocados) - a operacao NAO foi aplicada ao saldo."
+    )
+    return False
+
+
 def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
                     preco_unitario_usd: float | None = None,
                     quantidade_tokens: float | None = None,
                     chain: str = "solana") -> bool:
     """Debita o valor da compra do saldo virtual. Devolve False (e nao
-    debita nada) se nao houver saldo suficiente.
+    debita nada) se nao houver saldo suficiente OU se o valor falhar a
+    verificacao de sanidade (protecao contra bugs de unidades).
 
     Os campos extra sao opcionais (registos antigos nao os tem):
       mint               -> para o dashboard abrir o grafico do token
       preco_unitario_usd -> preco pago por unidade minima do token
       quantidade_tokens  -> quantas unidades minimas foram compradas
     Assim o historico fica completo mesmo depois de a posicao fechar."""
+    if not _sanidade_ok(valor_usd, "compra", simbolo):
+        return False
+
     dados = _carregar()
     if dados["saldo_atual_usd"] < valor_usd:
         return False
@@ -92,14 +118,24 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
                    preco_compra_usd: float | None = None,
                    preco_venda_usd: float | None = None,
                    quantidade_tokens: float | None = None,
-                   chain: str = "solana") -> None:
+                   chain: str = "solana") -> bool:
     """Credita o valor recebido da venda no saldo virtual e regista o
-    lucro/prejuizo realizado dessa operacao.
+    lucro/prejuizo realizado dessa operacao. Devolve False (e nao mexe
+    no saldo) se o valor falhar a verificacao de sanidade - protecao
+    contra bugs de unidades (ex: cotacao de um pool manipulado/ilíquido
+    a devolver um numero absurdo).
+
+    IMPORTANTE: se isto devolver False, quem chamou NAO deve fechar nem
+    reduzir a posicao - o "dinheiro" simulado nunca chegou a entrar, por
+    isso a posicao continua aberta para tentares vender outra vez depois.
 
     Os campos extra (opcionais) preservam o que a posicao sabia ANTES
     de ser apagada pelo fechar_posicao(): o mint, o preco a que se
     comprou, o preco a que se vendeu e a quantidade vendida - sem isto,
     fechada a posicao, esses dados perdiam-se para sempre."""
+    if not _sanidade_ok(valor_recebido_usd, "venda", simbolo):
+        return False
+
     dados = _carregar()
     lucro = valor_recebido_usd - valor_investido_usd
     dados["saldo_atual_usd"] += valor_recebido_usd
@@ -113,6 +149,7 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     _guardar(dados)
+    return True
 
 
 def remover_do_historico(timestamp: str) -> bool:

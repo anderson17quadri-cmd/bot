@@ -282,8 +282,14 @@ def comprar_na_curva(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: f
     if tokens <= 0:
         return {"sucesso": False, "dry_run": config.DRY_RUN, "mensagem": "Curva nao devolve tokens para este valor."}
 
-    preco_unit_sol = calc["preco_medio_sol"]
-    preco_unit_usd = preco_unit_sol * preco_sol_usd
+    # IMPORTANTE (bug corrigido): 'quantidade_tokens' e sempre guardada em
+    # unidades MINIMAS/raw (a mesma convencao do executor.py normal e do
+    # verificar_posicoes). O preco tem de ser CONSISTENTE com isso - preco
+    # por unidade minima, NAO por token inteiro. calc['preco_medio_sol'] e
+    # por token inteiro (so serve para display humano no CLI); aqui
+    # recalculamos o preco por unidade minima a partir do gasto real e da
+    # quantidade raw recebida, para nao desalinhar com quantidade_tokens.
+    preco_unit_usd = (valor_sol * preco_sol_usd) / tokens if tokens else 0.0
 
     # ---------------- DRY-RUN: so simula ----------------
     if config.DRY_RUN:

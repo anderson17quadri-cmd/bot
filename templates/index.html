@@ -99,7 +99,7 @@
   <div class="toast" id="toast" hidden></div>
 
   <main>
-    <!-- Ultima atualizacao + filtro de chain (multi-chain) -->
+    <!-- Ultima atualizacao + filtro de chain (multi-chain) + resetar -->
     <div class="linha-atualizacao">
       <p id="ultima-atualizacao" class="atualizacao">a ligar ao bot…</p>
       <!-- Filtro Solana / BSC / Ambas: so aparece se houver mais de uma
@@ -109,6 +109,8 @@
         <button class="chip-chain" data-chain="solana">Solana</button>
         <button class="chip-chain" data-chain="bsc">BSC</button>
       </div>
+      <!-- Resetar: so faz algo em modo SIMULADO, o backend recusa em REAL -->
+      <button class="btn-link-perigo" id="btn-abrir-resetar" title="Limpar dados de teste (só modo simulado)">Resetar bot</button>
     </div>
 
     <!-- ================= 1. CARTOES DE RESUMO ================= -->
@@ -414,6 +416,23 @@
       <div class="modal-botoes">
         <button class="btn btn-neutro" data-fechar>Cancelar</button>
         <button class="btn btn-perigo" id="btn-enviar-confirmar">Enviar</button>
+      </div>
+    </div>
+
+    <!-- Modal G: resetar o bot (limpar dados de teste) -->
+    <div class="modal" id="modal-resetar" hidden>
+      <h3 class="perigo">Resetar bot</h3>
+      <p class="texto-perigo">
+        Isto apaga TODO o histórico de trades, fecha todas as posições
+        abertas (sem vender) e repõe o saldo virtual inicial. É
+        <b>irreversível</b>. Só funciona em modo SIMULADO.
+      </p>
+      <p>Escreve <b class="num">RESETAR</b> para confirmar:</p>
+      <input type="text" id="input-resetar-confirmo" class="campo-texto num"
+             autocomplete="off" autocapitalize="characters" placeholder="RESETAR">
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="btn-resetar-confirmar" disabled>Resetar tudo</button>
       </div>
     </div>
 

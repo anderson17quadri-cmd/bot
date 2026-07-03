@@ -457,6 +457,16 @@ tr:last-child td { border-bottom: none; }
 }
 .chip-chain.ativo { background: rgba(139, 124, 246, 0.2); color: var(--accent); }
 
+/* Botao "Resetar bot": discreto (texto sublinhado a vermelho), so chama
+   atencao ao hover - nao e uma acao do dia a dia */
+.btn-link-perigo {
+  background: none; border: none; cursor: pointer;
+  color: var(--texto-mudo); font-family: var(--fonte-texto);
+  font-size: 0.72rem; text-decoration: underline dotted;
+  padding: 2px 4px; transition: color 0.15s;
+}
+.btn-link-perigo:hover { color: var(--vermelho); }
+
 /* Pastilha colorida do score no radar:
    verde = seguro (<30), amarelo = medio (30-60), vermelho = arriscado (>60) */
 .pastilha {

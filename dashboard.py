@@ -901,6 +901,64 @@ def api_modo():
     })
 
 
+@app.route("/api/resetar", methods=["POST"])
+def api_resetar():
+    """Reset a frio: limpa carteira.json, posicoes.json, radar.json e
+    watchlist.json, repondo o saldo virtual inicial. Serve para limpar
+    dados de teste (ou corrompidos por um bug ja corrigido).
+
+    SO funciona em modo DRY_RUN - nunca deixa resetar dados quando o
+    bot pode estar a gerir dinheiro real. Exige a palavra RESETAR no
+    pedido (a mesma defesa em camadas das outras acoes irreversiveis).
+    Nao vende as posicoes abertas - fecha-as "a frio" (sem passar pelo
+    executor), por isso o bot tem de estar PARADO."""
+    corpo = request.get_json(silent=True) or {}
+
+    if not _ler_dry_run_do_env():
+        return jsonify({
+            "ok": False,
+            "erro": "Reset bloqueado: o bot está em modo REAL. Resetar dados com fundos reais envolvidos é perigoso e não é permitido por aqui.",
+        }), 400
+
+    a_correr, _ = _estado_bot()
+    if a_correr:
+        return jsonify({
+            "ok": False,
+            "erro": "Para regear o bot primeiro: um reset com o bot a correr pode deixar processos a escrever em ficheiros que acabaram de ser limpos. Para o bot antes de resetar.",
+        }), 409
+
+    if corpo.get("confirmacao") != "RESETAR":
+        return jsonify({
+            "ok": False,
+            "erro": "Confirmação em falta: escreve RESETAR para limpar todos os dados de teste.",
+        }), 400
+
+    # Repoe a carteira virtual ao saldo inicial (nao apaga o ficheiro -
+    # reescreve-o limpo, para o saldo inicial configurado ficar visivel)
+    tmp = FICHEIRO_CARTEIRA_TMP = "carteira.json.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({
+            "saldo_inicial_usd": config.SALDO_VIRTUAL_INICIAL,
+            "saldo_atual_usd": config.SALDO_VIRTUAL_INICIAL,
+            "historico": [],
+        }, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, "carteira.json")
+
+    # Fecha todas as posicoes a frio (sem vender - e um reset, nao uma
+    # liquidacao) e limpa radar/watchlist
+    for ficheiro, vazio in (
+        ("posicoes.json", "{}"),
+        ("radar.json", "[]"),
+        ("watchlist.json", "[]"),
+    ):
+        tmp_f = ficheiro + ".tmp"
+        with open(tmp_f, "w", encoding="utf-8") as f:
+            f.write(vazio)
+        os.replace(tmp_f, ficheiro)
+
+    return jsonify({"ok": True, "saldo_inicial": config.SALDO_VIRTUAL_INICIAL})
+
+
 if __name__ == "__main__":
     modo = "DRY RUN (simulado)" if config.DRY_RUN else "REAL"
     print(f"Dashboard do bot - modo {modo}")
