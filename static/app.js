@@ -615,6 +615,69 @@ el("btn-copiar-endereco").addEventListener("click",
 el("btn-copiar-endereco-bsc").addEventListener("click",
   () => copiarTexto(el("endereco-wallet-bsc").textContent));
 
+/** Atualiza a secção "Tokens na carteira" (todos os SPL da wallet) */
+async function atualizarTokensCarteira() {
+  const dados = await (await fetch("/api/tokens_carteira")).json();
+  const tokens = dados.tokens || [];
+
+  el("vazio-tokens").hidden = tokens.length > 0;
+  if (!dados.configurada) {
+    el("vazio-tokens-msg").textContent = "Nenhuma wallet configurada — define WALLET_PRIVATE_KEY no .env.";
+  } else if (!tokens.length) {
+    el("vazio-tokens-msg").textContent = "A wallet não tem tokens SPL neste momento.";
+  }
+
+  el("tabela-tokens").innerHTML = tokens.map((t) => {
+    const qtd = t.quantidade.toLocaleString("pt-PT", { maximumFractionDigits: 4 });
+    const valor = t.valor_usd === null || t.valor_usd === undefined ? "–" : dinheiro(t.valor_usd);
+    // Guardamos os dados do token nos data-* para o modal de envio os ler
+    return `<tr>
+      <td>${linkToken(t.mint, t.simbolo === "?" ? t.mint.slice(0, 4) + "…" : t.simbolo, "", "solana")}</td>
+      <td>${qtd}</td>
+      <td>${valor}</td>
+      <td><button class="btn btn-mini btn-neutro" data-enviar-mint="${t.mint}"
+                  data-enviar-simbolo="${t.simbolo}" data-enviar-saldo="${t.quantidade}">Enviar</button></td>
+    </tr>`;
+  }).join("");
+}
+
+// --- Modal de envio de token ---
+let _envioToken = null; // {mint, simbolo, saldo}
+
+function abrirModalEnvio(mint, simbolo, saldo) {
+  _envioToken = { mint, simbolo, saldo };
+  el("enviar-simbolo").textContent = simbolo === "?" ? "token" : simbolo;
+  el("enviar-destino").value = "";
+  el("enviar-quantidade").value = "";
+  el("enviar-confirmo").value = "";
+  el("enviar-saldo").textContent = `(tens ${Number(saldo).toLocaleString("pt-PT", { maximumFractionDigits: 4 })})`;
+  // A caixa CONFIRMO so aparece em modo REAL (o backend exige na mesma)
+  const emReal = estadoBot && !estadoBot.dry_run_env;
+  el("enviar-confirmo-bloco").hidden = !emReal;
+  abrirModal("modal-enviar");
+}
+
+el("btn-enviar-confirmar").addEventListener("click", async () => {
+  if (!_envioToken) return;
+  const destino = el("enviar-destino").value.trim();
+  const quantidade = parseFloat(el("enviar-quantidade").value.replace(",", "."));
+  if (!destino) { toast("Indica o endereço de destino.", "erro"); return; }
+  if (!(quantidade > 0)) { toast("Indica uma quantidade válida.", "erro"); return; }
+
+  const emReal = estadoBot && !estadoBot.dry_run_env;
+  const corpo = { mint: _envioToken.mint, destino, quantidade };
+  if (emReal) {
+    const palavra = el("enviar-confirmo").value.trim();
+    if (palavra !== "CONFIRMO") { toast("Escreve CONFIRMO para autorizar o envio real.", "erro"); return; }
+    corpo.confirmacao = palavra;
+  }
+  const r = await pedirAcao("/api/enviar_token", corpo);
+  fecharModais();
+  toast(r.ok ? r.mensagem || "Envio efetuado." : r.erro || r.mensagem || "Falha no envio.",
+        r.ok ? "sucesso" : "erro");
+  atualizarTokensCarteira();
+});
+
 /** Atualiza a caixa "Log ao vivo" com as ultimas linhas do bot.log */
 async function atualizarLog() {
   const resposta = await fetch("/api/bot/log");
@@ -823,6 +886,14 @@ async function atualizarRadar() {
 // os seus listeners. Solucao classica: UM listener no documento que
 // apanha cliques nos botoes pelos atributos data-* (delegacao).
 document.addEventListener("click", async (evento) => {
+  // Botao "Enviar" da seccao Tokens na carteira (abre o modal de envio)
+  const btnEnviar = evento.target.closest("button[data-enviar-mint]");
+  if (btnEnviar) {
+    abrirModalEnvio(btnEnviar.dataset.enviarMint, btnEnviar.dataset.enviarSimbolo,
+                    btnEnviar.dataset.enviarSaldo);
+    return;
+  }
+
   const btn = evento.target.closest(
     "button[data-vender], button[data-comprar], button[data-seguir], " +
     "button[data-auto], button[data-remover-hist]");
@@ -909,6 +980,7 @@ async function atualizarTudo() {
       atualizarStatus(),
       atualizarLog(),
       atualizarCarteira(),
+      atualizarTokensCarteira(),
       atualizarCurva(),
     ]);
     el("ultima-atualizacao").textContent =

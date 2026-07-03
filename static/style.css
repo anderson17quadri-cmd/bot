@@ -644,3 +644,7 @@ tr:last-child td { border-bottom: none; }
   text-align: center;
 }
 .campo-texto::placeholder { color: #3d4552; letter-spacing: 2px; }
+
+/* Rotulos e dica de saldo no modal de envio de tokens */
+.campo-label { font-size: 0.72rem; color: var(--texto-mudo); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; margin-top: 2px; }
+.saldo-hint { text-transform: none; color: var(--texto-suave); font-weight: 400; letter-spacing: 0; }

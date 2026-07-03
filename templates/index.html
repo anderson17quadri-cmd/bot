@@ -160,6 +160,30 @@
       </div>
     </section>
 
+    <!-- ================= 2b. TOKENS NA CARTEIRA ================= -->
+    <!-- Lista TODOS os tokens SPL que a wallet tem (nao so os do bot).
+         Cada um tem um botao Enviar (acao irreversivel, bem protegida). -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-carteira"/></svg> Tokens na carteira</h2>
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Símbolo</th>
+              <th>Quantidade</th>
+              <th>Valor</th>
+              <th>Enviar</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-tokens"></tbody>
+        </table>
+      </div>
+      <div class="vazio" id="vazio-tokens" hidden>
+        <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-carteira"/></svg>
+        <p id="vazio-tokens-msg">A wallet não tem tokens SPL (ou nenhuma wallet configurada).</p>
+      </div>
+    </section>
+
     <!-- ================= 3. LOG AO VIVO DO BOT ================= -->
     <section class="painel">
       <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-terminal"/></svg> Log ao vivo</h2>
@@ -365,6 +389,31 @@
       <div class="modal-botoes">
         <button class="btn btn-neutro" data-fechar>Cancelar</button>
         <button class="btn btn-perigo" id="acao-confirmar">Confirmar</button>
+      </div>
+    </div>
+
+    <!-- Modal F: enviar token da carteira (acao irreversivel) -->
+    <div class="modal" id="modal-enviar" hidden>
+      <h3 class="perigo">Enviar <span id="enviar-simbolo">token</span></h3>
+      <p class="texto-perigo">
+        Enviar tokens é <b>irreversível</b>. Confirma bem o endereço de
+        destino — se estiver errado, os tokens perdem-se para sempre.
+      </p>
+      <label class="campo-label">Endereço de destino</label>
+      <input type="text" id="enviar-destino" class="campo-texto num" style="letter-spacing:0"
+             autocomplete="off" placeholder="Endereço Solana do destino">
+      <label class="campo-label">Quantidade <span id="enviar-saldo" class="saldo-hint"></span></label>
+      <input type="text" id="enviar-quantidade" class="campo-texto num" style="letter-spacing:0"
+             autocomplete="off" inputmode="decimal" placeholder="0.0">
+      <!-- Em modo REAL, caixa CONFIRMO obrigatoria (backend tambem exige) -->
+      <div id="enviar-confirmo-bloco" hidden>
+        <p class="texto-perigo">Modo REAL — escreve <b>CONFIRMO</b> para autorizar:</p>
+        <input type="text" id="enviar-confirmo" class="campo-texto num"
+               autocomplete="off" autocapitalize="characters" placeholder="CONFIRMO">
+      </div>
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="btn-enviar-confirmar">Enviar</button>
       </div>
     </div>
 

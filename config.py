@@ -214,6 +214,15 @@ def fase2_configurada() -> bool:
     return bool(WALLET_PRIVATE_KEY)
 
 
+# ==========================================================================
+# 7c) Envio de tokens SPL da carteira (dashboard) - acao com dinheiro real
+# ==========================================================================
+# Enviar tokens e IRREVERSIVEL. Como no pump.fun e na BSC, o envio
+# on-chain em modo REAL so acontece se esta trava for explicitamente
+# ligada (alem do CONFIRMO exigido no pedido). Em DRY_RUN nunca envia.
+PERMITIR_ENVIO_TOKENS = _env_texto("PERMITIR_ENVIO_TOKENS", "false").lower() in ("1", "true", "yes", "sim")
+
+
 def resumo() -> str:
     linhas = [
         f"RPC Solana        : {SOLANA_RPC_URL}",

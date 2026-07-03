@@ -819,6 +819,51 @@ def api_pumpfun_toggle():
     return jsonify({"ok": True, "ativo": ativar, "precisa_reiniciar": a_correr})
 
 
+@app.route("/api/tokens_carteira")
+def api_tokens_carteira():
+    """Lista os tokens SPL que a wallet do bot detem agora (simbolo,
+    quantidade e valor USD quando o RPC e Helius). So leitura."""
+    try:
+        import carteira_tokens
+        return jsonify(carteira_tokens.listar_tokens())
+    except ImportError:
+        return jsonify({"configurada": False, "erro": "solders não instalado.", "tokens": []})
+    except Exception as e:
+        return jsonify({"configurada": False, "erro": str(e), "tokens": []})
+
+
+@app.route("/api/enviar_token", methods=["POST"])
+def api_enviar_token():
+    """Envia um token SPL da wallet do bot para outro endereco.
+    ACAO IRREVERSIVEL. Em modo REAL exige a palavra CONFIRMO (alem da
+    trava PERMITIR_ENVIO_TOKENS que o proprio modulo verifica)."""
+    corpo = request.get_json(silent=True) or {}
+    mint = corpo.get("mint", "")
+    destino = corpo.get("destino", "")
+    try:
+        quantidade = float(corpo.get("quantidade", 0))
+    except (TypeError, ValueError):
+        quantidade = 0
+    if not mint or not destino or quantidade <= 0:
+        return jsonify({"ok": False, "erro": "Preciso de mint, destino e quantidade (> 0)."}), 400
+
+    # Em modo REAL, a mesma barreira CONFIRMO das outras acoes de dinheiro
+    erro = _exigir_confirmo_em_modo_real(corpo)
+    if erro:
+        return erro
+
+    try:
+        import carteira_tokens
+        r = carteira_tokens.enviar_token(mint, destino, quantidade)
+    except ImportError:
+        return jsonify({"ok": False, "erro": "solders não instalado — instala as dependências do bot."}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "erro": f"Falha no envio: {e}"}), 500
+
+    return jsonify({"ok": bool(r.get("sucesso")), "mensagem": r.get("mensagem", ""),
+                    "dry_run": r.get("dry_run")})
+
+
 @app.route("/api/modo", methods=["POST"])
 def api_modo():
     """Muda DRY_RUN no .env. A validacao critica vive AQUI no backend:
