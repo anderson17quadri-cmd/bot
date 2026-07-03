@@ -66,6 +66,16 @@
       </div>
     </div>
 
+    <!-- Toggle EXPERIMENTAL: compra na bonding curve do pump.fun -->
+    <div class="topo-linha linha-curva">
+      <label class="switch-curva">
+        <input type="checkbox" id="chk-curva">
+        <span class="switch-visual"></span>
+        <span class="switch-texto">Comprar na bonding curve (pump.fun)</span>
+      </label>
+      <span class="aviso-curva" id="aviso-curva" hidden>⚠ risco de perda total</span>
+    </div>
+
     <div class="topo-linha">
       <!-- Indicador de estado do bot: bolinha pulsante + texto -->
       <div class="estado-bot" id="estado-bot">
@@ -319,6 +329,24 @@
       <div class="modal-botoes">
         <button class="btn btn-neutro" data-fechar>Cancelar</button>
         <button class="btn btn-perigo" id="acao-confirmar">Confirmar</button>
+      </div>
+    </div>
+
+    <!-- Modal E: ativar compra na bonding curve (experimental) -->
+    <div class="modal" id="modal-curva" hidden>
+      <h3 class="perigo">⚠ Compra na bonding curve</h3>
+      <p class="texto-perigo">
+        A maioria dos tokens na bonding curve <b>NUNCA chega a migrar</b> —
+        muitos vão a zero ainda na curva. Este modo assume um risco
+        <b>muito maior de perda total</b> do valor investido. Só ativa se
+        entenderes este risco.
+      </p>
+      <p>Escreve <b class="num">CONFIRMO</b> para ativar:</p>
+      <input type="text" id="input-curva-confirmo" class="campo-texto num"
+             autocomplete="off" autocapitalize="characters" placeholder="CONFIRMO">
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="btn-curva-confirmar" disabled>Ativar modo curva</button>
       </div>
     </div>
 

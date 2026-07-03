@@ -145,6 +145,32 @@ h1 .subtitulo { color: var(--accent); font-weight: 600; font-size: 0.7rem; lette
 .segmento.ativo-simulado { background: rgba(250, 178, 25, 0.18); color: var(--amarelo); }
 .segmento.ativo-real     { background: rgba(255, 92, 122, 0.20); color: var(--vermelho); }
 
+/* --- Toggle da bonding curve (experimental) --- */
+.linha-curva { padding-top: 2px; }
+.switch-curva { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 0.8rem; color: var(--texto-suave); }
+.switch-curva input { display: none; }  /* escondemos o checkbox nativo */
+.switch-visual {
+  width: 38px; height: 21px;
+  background: var(--fundo-elevado);
+  border: 1px solid var(--linha-grelha);
+  border-radius: 999px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.switch-visual::after {
+  content: "";
+  position: absolute; top: 2px; left: 2px;
+  width: 15px; height: 15px;
+  background: var(--texto-mudo);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+/* Ligado: o switch fica amarelo (cor de aviso) e a bolinha desliza */
+.switch-curva input:checked + .switch-visual { background: rgba(250, 178, 25, 0.3); border-color: var(--amarelo); }
+.switch-curva input:checked + .switch-visual::after { transform: translateX(17px); background: var(--amarelo); }
+.aviso-curva { color: var(--amarelo); font-size: 0.72rem; font-weight: 600; }
+
 /* --- Indicador de estado do bot (bolinha + texto) --- */
 .estado-bot {
   display: flex;
@@ -415,6 +441,7 @@ tr:last-child td { border-bottom: none; }
 .tag.compra   { background: rgba(57, 135, 229, 0.16);  color: var(--azul); }
 .tag.venda    { background: rgba(46, 224, 111, 0.13);  color: var(--verde); }
 .tag.comprado { background: rgba(139, 124, 246, 0.18); color: var(--accent); }
+.tag.curva    { background: rgba(250, 178, 25, 0.16);  color: var(--amarelo); }
 
 /* Pastilha colorida do score no radar:
    verde = seguro (<30), amarelo = medio (30-60), vermelho = arriscado (>60) */

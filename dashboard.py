@@ -348,6 +348,7 @@ def api_posicoes():
             "quantidade_tokens": quantidade,
             "timestamp_compra": p.get("timestamp_compra"),
             "dry_run": p.get("dry_run", True),
+            "origem": p.get("origem"),  # "bonding_curve" ou None (compra normal)
             "valor_atual_usd": round(valor_atual, 2) if valor_atual is not None else None,
             "lucro_nao_realizado_usd": lucro_nao_realizado,
         })
@@ -678,6 +679,79 @@ def api_wallet():
 # --------------------------------------------------------------------------
 # Rota de mudanca de modo SIMULADO <-> REAL (Parte 3)
 # --------------------------------------------------------------------------
+def _ler_bool_do_env(chave: str, defeito: bool = False) -> bool:
+    """Le um booleano diretamente do .env (relido a cada pedido, como o
+    DRY_RUN). Sem a linha -> devolve o defeito."""
+    if not os.path.exists(".env"):
+        return defeito
+    try:
+        with open(".env", "r", encoding="utf-8") as f:
+            for linha in f:
+                linha = linha.strip()
+                if linha.startswith(f"{chave}="):
+                    valor = linha.split("=", 1)[1].strip().strip('"').strip("'")
+                    return valor.lower() in ("1", "true", "yes", "sim")
+    except OSError:
+        pass
+    return defeito
+
+
+def _escrever_bool_no_env(chave: str, valor: bool) -> None:
+    """Atualiza SO a linha 'chave=...' do .env (atomico), preservando o
+    resto. Reutiliza a mesma logica do DRY_RUN mas para qualquer chave."""
+    texto = "true" if valor else "false"
+    linhas = []
+    substituida = False
+    if os.path.exists(".env"):
+        with open(".env", "r", encoding="utf-8") as f:
+            for linha in f:
+                if linha.strip().startswith(f"{chave}="):
+                    linhas.append(f"{chave}={texto}\n")
+                    substituida = True
+                else:
+                    linhas.append(linha)
+    if not substituida:
+        if linhas and not linhas[-1].endswith("\n"):
+            linhas[-1] += "\n"
+        linhas.append(f"{chave}={texto}\n")
+    tmp = ".env.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.writelines(linhas)
+    os.replace(tmp, ".env")
+
+
+@app.route("/api/pumpfun")
+def api_pumpfun():
+    """Estado do modo 'compra na bonding curve' (experimental)."""
+    return jsonify({
+        "ativo": _ler_bool_do_env("PUMPFUN_BONDING_CURVE_ATIVO", False),
+        # So informativo: quanto arrisca por trade e o limiar apertado
+        "max_trade_usd": config.PUMPFUN_MAX_TRADE_USD,
+        "score_max": config.PUMPFUN_SCORE_COMPRA_MAX,
+    })
+
+
+@app.route("/api/pumpfun", methods=["POST"])
+def api_pumpfun_toggle():
+    """Liga/desliga o modo curva. Ligar (a direcao arriscada) exige a
+    palavra CONFIRMO no pedido - a validacao vive no BACKEND, tal como
+    a mudanca para modo REAL. Desligar e sempre livre."""
+    corpo = request.get_json(silent=True) or {}
+    if "ativo" not in corpo:
+        return jsonify({"ok": False, "erro": "Pedido inválido: falta 'ativo'."}), 400
+    ativar = bool(corpo["ativo"])
+
+    if ativar and corpo.get("confirmacao") != "CONFIRMO":
+        return jsonify({
+            "ok": False,
+            "erro": "Ativar a compra na bonding curve exige escrever CONFIRMO (risco de perda total).",
+        }), 400
+
+    _escrever_bool_no_env("PUMPFUN_BONDING_CURVE_ATIVO", ativar)
+    a_correr, _ = _estado_bot()
+    return jsonify({"ok": True, "ativo": ativar, "precisa_reiniciar": a_correr})
+
+
 @app.route("/api/modo", methods=["POST"])
 def api_modo():
     """Muda DRY_RUN no .env. A validacao critica vive AQUI no backend:

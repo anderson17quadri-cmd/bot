@@ -82,12 +82,81 @@ def obter_preco_sol_usd() -> float:
     return float(cot["outAmount"]) / 1_000_000  # USDC tem 6 casas decimais
 
 
+def _e_pumpfun_curva(dados: dict) -> bool:
+    """True se o token vem do pump.fun (candidato a compra na bonding
+    curve, antes de graduar). O detector marca o dex como 'pump-fun'."""
+    return "pump" in (dados.get("dex") or "").lower()
+
+
+def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
+    """Tenta comprar um token AINDA na bonding curve do pump.fun.
+
+    So corre se TUDO isto for verdade (caso contrario devolve False e o
+    fluxo normal segue):
+      - o toggle PUMPFUN_BONDING_CURVE_ATIVO esta ligado
+      - o token e do pump.fun
+      - o score passa o limiar APERTADO da curva (mais exigente)
+      - ja passou o atraso minimo desde o lancamento (evita o instante
+        inicial, onde estao os piores scams)
+    Usa o limite de trade proprio da curva (mais baixo). Nunca rebenta.
+    """
+    if not config.PUMPFUN_BONDING_CURVE_ATIVO or not _e_pumpfun_curva(dados):
+        return False
+
+    score = analise_ia["score_final"]
+    simbolo = dados["token_simbolo"]
+
+    # Limiar de score proprio, mais apertado que o das compras normais
+    if score > config.PUMPFUN_SCORE_COMPRA_MAX:
+        alerts.info(
+            f"[dim][curva] {simbolo} score {score} > limiar apertado "
+            f"{config.PUMPFUN_SCORE_COMPRA_MAX} - nao compra na curva[/dim]"
+        )
+        return True  # era candidato de curva, mas rejeitado: NAO cai no fluxo normal
+
+    # Atraso minimo: usa a idade do pool como proxy do tempo desde o lancamento
+    idade_seg = dados.get("idade_minutos", 0) * 60
+    if idade_seg < config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS:
+        alerts.info(
+            f"[dim][curva] {simbolo} demasiado recente "
+            f"({idade_seg:.0f}s < {config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS}s) - espera[/dim]"
+        )
+        return True
+
+    mint = dados["token_mint"]
+    if mint in posicoes.listar_posicoes_abertas():
+        return True
+
+    if config.DRY_RUN:
+        import carteira
+        if carteira.saldo_disponivel() < config.PUMPFUN_MAX_TRADE_USD:
+            return True
+
+    try:
+        import executor_pumpfun
+        preco_sol_usd = obter_preco_sol_usd()
+        r = executor_pumpfun.comprar_na_curva(
+            mint=mint, simbolo=simbolo,
+            valor_usd=config.PUMPFUN_MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
+        )
+        cor = "green" if r.get("sucesso") else "yellow"
+        alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
+    except Exception as e:
+        alerts.info(f"[red]Falha na compra na curva de {simbolo}:[/red] {e}")
+    return True  # tratado pelo caminho da curva, nao cai no fluxo normal
+
+
 def tentar_comprar(dados: dict, analise_ia: dict) -> None:
     """Se o score final for suficientemente baixo (seguro), tenta comprar
     (real ou simulado, consoante config.DRY_RUN). Nunca deixa uma falha
     de compra derrubar o bot."""
     if not config.fase2_configurada():
         return  # sem wallet configurada, Fase 2 desligada
+
+    # Se o token e do pump.fun e o modo curva esta ligado, esse caminho
+    # trata dele (compra na curva ou rejeita) - nao duplicamos com Jupiter
+    if tentar_comprar_curva(dados, analise_ia):
+        return
 
     score = analise_ia["score_final"]
     if score > config.SCORE_COMPRA_MAX:

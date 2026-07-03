@@ -324,6 +324,45 @@ el("btn-reiniciar").addEventListener("click", async () => {
   await atualizarStatus();
 });
 
+// --- Toggle da bonding curve (experimental, com confirmacao CONFIRMO) ---
+async function atualizarCurva() {
+  const dados = await (await fetch("/api/pumpfun")).json();
+  el("chk-curva").checked = dados.ativo;
+  el("aviso-curva").hidden = !dados.ativo;
+}
+
+el("chk-curva").addEventListener("click", (evento) => {
+  // Ligar exige confirmacao explicita; desligar e livre e imediato
+  if (evento.target.checked) {
+    evento.preventDefault(); // so liga depois do CONFIRMO
+    el("input-curva-confirmo").value = "";
+    el("btn-curva-confirmar").disabled = true;
+    abrirModal("modal-curva");
+    el("input-curva-confirmo").focus();
+  } else {
+    pedirAcao("/api/pumpfun", { ativo: false }).then(() => {
+      toast("Modo bonding curve desligado.", "sucesso");
+      atualizarCurva();
+    });
+  }
+});
+
+el("input-curva-confirmo").addEventListener("input", () => {
+  el("btn-curva-confirmar").disabled = el("input-curva-confirmo").value.trim() !== "CONFIRMO";
+});
+el("btn-curva-confirmar").addEventListener("click", async () => {
+  const r = await pedirAcao("/api/pumpfun", {
+    ativo: true, confirmacao: el("input-curva-confirmo").value.trim(),
+  });
+  fecharModais();
+  if (r.ok) {
+    toast("Modo bonding curve ATIVADO" + (r.precisa_reiniciar ? " — reinicia o bot para aplicar." : "."), "sucesso");
+  } else {
+    toast(r.erro || "Não foi possível ativar.", "erro");
+  }
+  atualizarCurva();
+});
+
 // --- Toggle SIMULADO/REAL (controlo segmentado) ---
 
 /** Pede ao backend para mudar o modo no .env */
@@ -566,8 +605,12 @@ async function atualizarPosicoes() {
       const classe = p.lucro_nao_realizado_usd >= 0 ? "positivo" : "negativo";
       celulaPL = `<td class="${classe}">${dinheiroComSinal(p.lucro_nao_realizado_usd)}</td>`;
     }
+    // Tag para distinguir compras na bonding curve das compras normais
+    const tagCurva = p.origem === "bonding_curve"
+      ? ' <span class="tag curva">BONDING CURVE</span>' : "";
+
     return `<tr>
-      <td>${linkToken(p.mint, p.simbolo, p.dex)}</td>
+      <td>${linkToken(p.mint, p.simbolo, p.dex)}${tagCurva}</td>
       <td>${dinheiro(p.valor_investido_usd)}</td>
       <td>$${p.preco_compra_usd.toPrecision(4)}</td>
       <td>${p.quantidade_tokens.toLocaleString("pt-PT", { maximumFractionDigits: 0 })}</td>
@@ -715,6 +758,7 @@ async function atualizarTudo() {
       atualizarStatus(),
       atualizarLog(),
       atualizarCarteira(),
+      atualizarCurva(),
     ]);
     el("ultima-atualizacao").textContent =
       "Atualizado às " + new Date().toLocaleTimeString("pt-PT");

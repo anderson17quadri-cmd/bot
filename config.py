@@ -135,6 +135,25 @@ FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
 INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)
 
 
+# ==========================================================================
+# 7b) BONDING CURVE do pump.fun (Parte C) - EXPERIMENTAL e ARRISCADO
+# ==========================================================================
+# Comprar tokens AINDA na bonding curve (antes de migrarem para um pool
+# normal). A esmagadora maioria destes tokens NUNCA gradua - risco de
+# perda total muito maior. Por isso: desligado por defeito, limite de
+# trade mais baixo, limiar de score mais apertado e atraso minimo antes
+# de comprar (evita o instante do lancamento, onde estao os piores scams).
+PUMPFUN_BONDING_CURVE_ATIVO = _env_texto("PUMPFUN_BONDING_CURVE_ATIVO", "false").lower() in ("1", "true", "yes", "sim")
+PUMPFUN_MAX_TRADE_USD = _env_float("PUMPFUN_MAX_TRADE_USD", 2.0)          # < MAX_TRADE_USD normal
+PUMPFUN_SCORE_COMPRA_MAX = _env_int("PUMPFUN_SCORE_COMPRA_MAX", 10)       # mais apertado que SCORE_COMPRA_MAX
+PUMPFUN_ATRASO_MINIMO_SEGUNDOS = _env_int("PUMPFUN_ATRASO_MINIMO_SEGUNDOS", 45)
+# Trava final de envio real: mesmo com DRY_RUN=false, o envio on-chain da
+# compra na curva so acontece se isto for explicitamente true. O construtor
+# da transacao foi escrito a partir do IDL oficial mas NAO foi validado com
+# uma compra real em mainnet - esta trava evita disparos acidentais.
+PUMPFUN_PERMITIR_ENVIO_REAL = _env_texto("PUMPFUN_PERMITIR_ENVIO_REAL", "false").lower() in ("1", "true", "yes", "sim")
+
+
 def fase2_configurada() -> bool:
     return bool(WALLET_PRIVATE_KEY)
 
