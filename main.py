@@ -226,22 +226,49 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
         alerts.info(f"[red]Falha na compra de {simbolo}:[/red] {e}")
 
 
+def _vender_posicao(mint: str, chain: str, percentagem: float) -> dict:
+    """Vende uma percentagem de uma posicao, escolhendo o executor certo
+    pela chain (PancakeSwap para BSC, Jupiter para Solana)."""
+    if chain == "bsc":
+        import executor_bsc
+        return executor_bsc.vender_token(mint, percentagem)
+    return executor.vender_token(mint, percentagem)
+
+
 def verificar_posicoes() -> None:
     """Percorre todas as posicoes abertas e aplica as regras de
-    stop-loss / take-profit / trailing stop."""
+    stop-loss / take-profit / trailing stop.
+
+    Posicoes com 'gestao_automatica' a False sao SALTADAS (o utilizador
+    desativou o acompanhamento automatico e gere-as so manualmente)."""
     abertas = posicoes.listar_posicoes_abertas()
     if not abertas:
         return
 
     for mint, pos in abertas.items():
+        # Respeita o toggle por posicao: se o utilizador desligou o
+        # acompanhamento automatico, o bot nao lhe toca (so venda manual)
+        if pos.get("gestao_automatica") is False:
+            continue
+
+        chain = pos.get("chain", "solana")
         try:
-            # Preco atual: cotacao do token -> USDC, dividido pela quantidade
-            cot = executor._obter_cotacao(
-                mint, config.MINT_USDC, int(pos["quantidade_tokens"])
-            )
-            valor_atual_usd = float(cot["outAmount"]) / 1_000_000
             quantidade = pos["quantidade_tokens"]
-            preco_atual = valor_atual_usd / quantidade if quantidade else 0
+            if chain == "bsc":
+                # BSC: valor atual via PancakeSwap (token -> BNB -> USD)
+                import executor_bsc
+                valor_atual_usd = executor_bsc.valor_atual_usd(mint, quantidade)
+                if valor_atual_usd is None:
+                    raise RuntimeError("sem rota de venda na PancakeSwap")
+                # preco por unidade minima (mesma convencao de compra BSC: 1e18)
+                preco_atual = valor_atual_usd / (quantidade / 1e18) if quantidade else 0
+            else:
+                # Solana: cotacao do token -> USDC, dividido pela quantidade
+                cot = executor._obter_cotacao(
+                    mint, config.MINT_USDC, int(quantidade)
+                )
+                valor_atual_usd = float(cot["outAmount"]) / 1_000_000
+                preco_atual = valor_atual_usd / quantidade if quantidade else 0
         except Exception as e:
             alerts.info(f"[yellow]Nao consegui cotar {pos['simbolo']}:[/yellow] {e}")
             continue
@@ -261,7 +288,7 @@ def verificar_posicoes() -> None:
                 f"({variacao_pct:.1f}%). A vender tudo...[/red]"
             )
             try:
-                r = executor.vender_token(mint, 100)
+                r = _vender_posicao(mint, chain, 100)
                 alerts.info(f"[red]{r['mensagem']}[/red]")
             except Exception as e:
                 alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
@@ -279,7 +306,7 @@ def verificar_posicoes() -> None:
                 f"{config.TAKE_PROFIT_VENDER_PCT}%...[/green]"
             )
             try:
-                r = executor.vender_token(mint, config.TAKE_PROFIT_VENDER_PCT)
+                r = _vender_posicao(mint, chain, config.TAKE_PROFIT_VENDER_PCT)
                 alerts.info(f"[green]{r['mensagem']}[/green]")
                 posicoes.atualizar_posicao(mint, take_profit_disparado=True)
             except Exception as e:
@@ -296,7 +323,7 @@ def verificar_posicoes() -> None:
                     f"A vender o resto...[/yellow]"
                 )
                 try:
-                    r = executor.vender_token(mint, 100)
+                    r = _vender_posicao(mint, chain, 100)
                     alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
                 except Exception as e:
                     alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
@@ -313,32 +340,38 @@ def reavaliar_watchlist() -> None:
     if not registos:
         return
 
-    try:
-        preco_sol = obter_preco_sol_usd()
-    except Exception:
-        return  # sem preco do SOL nao ha como converter; tenta no proximo ciclo
-
-    # 0.01 SOL e suficiente para obter uma cotacao representativa
-    LAMPORTS_TESTE = 10_000_000
+    # Preco do SOL so e preciso para os tokens Solana (calculado uma vez)
+    preco_sol = None
+    LAMPORTS_TESTE = 10_000_000  # 0.01 SOL da uma cotacao representativa
 
     for r in registos:
         mint = r.get("mint")
         if not mint:
             continue
+        chain = r.get("chain", "solana")
         try:
-            cot = executor._obter_cotacao(config.MINT_SOL, mint, LAMPORTS_TESTE)
-            tokens_recebidos = float(cot.get("outAmount", 0))
-            if tokens_recebidos > 0:
-                # Preco por unidade minima do token (mesma convencao das posicoes)
-                valor_usd_teste = 0.01 * preco_sol
-                preco_unitario = valor_usd_teste / tokens_recebidos
-                watchlist.atualizar_reavaliacao(mint, preco_unitario, liquidez_viva=True)
+            if chain == "bsc":
+                # BSC: uma quantidade simbolica do token -> ha rota na PancakeSwap?
+                import executor_bsc
+                valor = executor_bsc.valor_atual_usd(mint, 10**18)  # 1 token (18 dec)
+                if valor and valor > 0:
+                    watchlist.atualizar_reavaliacao(mint, valor, liquidez_viva=True)
+                else:
+                    watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
             else:
-                watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
+                if preco_sol is None:
+                    preco_sol = obter_preco_sol_usd()
+                cot = executor._obter_cotacao(config.MINT_SOL, mint, LAMPORTS_TESTE)
+                tokens_recebidos = float(cot.get("outAmount", 0))
+                if tokens_recebidos > 0:
+                    preco_unitario = (0.01 * preco_sol) / tokens_recebidos
+                    watchlist.atualizar_reavaliacao(mint, preco_unitario, liquidez_viva=True)
+                else:
+                    watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
         except Exception:
-            # Jupiter nao cotou -> sem rota de troca -> liquidez morta/rugada
+            # Sem rota de troca -> liquidez provavelmente morta/rugada
             watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
-        time.sleep(0.3)  # pausa curta para nao martelar a API da Jupiter
+        time.sleep(0.3)  # pausa curta para nao martelar as APIs
 
 
 def processar_pool(pool: dict) -> None:

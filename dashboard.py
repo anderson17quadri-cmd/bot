@@ -557,18 +557,24 @@ def api_comprar():
         (r for r in watchlist.carregar_watchlist() if r.get("mint") == mint), None
     )
     simbolo = (entrada or {}).get("simbolo") or corpo.get("simbolo") or "?"
+    # A chain vem da watchlist (BSC vs Solana) - decide o executor certo
+    chain = (entrada or {}).get("chain") or corpo.get("chain") or "solana"
 
     try:
-        executor = _carregar_executor()
-        # Preco do SOL para converter MAX_TRADE_USD em lamports
-        cot_sol = executor._obter_cotacao(config.MINT_SOL, config.MINT_USDC, 1_000_000_000)
-        preco_sol_usd = float(cot_sol["outAmount"]) / 1_000_000
-        resultado = executor.comprar_token(
-            mint=mint, simbolo=simbolo,
-            valor_usd=config.MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
-        )
+        if chain == "bsc":
+            import executor_bsc
+            resultado = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD)
+        else:
+            executor = _carregar_executor()
+            # Preco do SOL para converter MAX_TRADE_USD em lamports
+            cot_sol = executor._obter_cotacao(config.MINT_SOL, config.MINT_USDC, 1_000_000_000)
+            preco_sol_usd = float(cot_sol["outAmount"]) / 1_000_000
+            resultado = executor.comprar_token(
+                mint=mint, simbolo=simbolo,
+                valor_usd=config.MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
+            )
     except ImportError:
-        return jsonify({"ok": False, "erro": "Biblioteca 'solders' não instalada — instala as dependências do bot."}), 500
+        return jsonify({"ok": False, "erro": "Dependências do bot em falta (solders/eth-account) — instala requirements.txt."}), 500
     except Exception as e:
         return jsonify({"ok": False, "erro": f"Falha na compra: {e}"}), 500
 
@@ -596,14 +602,21 @@ def api_vender():
     if erro:
         return erro
 
-    if mint not in _ler_posicoes():
+    posicoes_abertas = _ler_posicoes()
+    if mint not in posicoes_abertas:
         return jsonify({"ok": False, "erro": "Não há posição aberta neste token."}), 404
 
+    # A chain da propria posicao decide o executor (PancakeSwap vs Jupiter)
+    chain = posicoes_abertas[mint].get("chain", "solana")
     try:
-        executor = _carregar_executor()
-        resultado = executor.vender_token(mint, percentagem)
+        if chain == "bsc":
+            import executor_bsc
+            resultado = executor_bsc.vender_token(mint, percentagem)
+        else:
+            executor = _carregar_executor()
+            resultado = executor.vender_token(mint, percentagem)
     except ImportError:
-        return jsonify({"ok": False, "erro": "Biblioteca 'solders' não instalada — instala as dependências do bot."}), 500
+        return jsonify({"ok": False, "erro": "Dependências do bot em falta (solders/eth-account) — instala requirements.txt."}), 500
     except Exception as e:
         return jsonify({"ok": False, "erro": f"Falha na venda: {e}"}), 500
 
@@ -645,8 +658,13 @@ def api_wallet():
     exchange/wallet) + saldo atual em SOL + QR code do endereco.
 
     A CHAVE PRIVADA NUNCA sai daqui - so o endereco publico.
-    Sem WALLET_PRIVATE_KEY no .env -> {"configurada": false}."""
+    Sem nenhuma wallet (Solana nem BSC) no .env -> {"configurada": false}."""
+    # Se so a BSC estiver configurada, mostramos so a parte BSC
     if not config.fase2_configurada():
+        bsc = _wallet_bsc_info()
+        if bsc:
+            return jsonify({"configurada": True, "so_bsc": True, "bsc": bsc,
+                            "endereco": None, "saldo_sol": None, "qr_svg": None})
         return jsonify({"configurada": False})
 
     # Cache de 30s (o endereco e fixo; o saldo nao muda a cada 4s)
@@ -673,10 +691,29 @@ def api_wallet():
         "endereco": endereco,
         "saldo_sol": saldo_sol,
         "qr_svg": _gerar_qr_svg(endereco),
+        # Wallet BSC (se configurada) - endereco + saldo BNB
+        "bsc": _wallet_bsc_info(),
     }
     _cache_wallet["quando"] = agora
     _cache_wallet["resposta"] = resposta
     return jsonify(resposta)
+
+
+def _wallet_bsc_info():
+    """Info da wallet BSC (endereco 0x + saldo BNB), ou None se nao
+    configurada. Import lazy do eth-account, tolerante a falha."""
+    if not config.fase2_bsc_configurada():
+        return None
+    try:
+        import wallet_bsc
+        endereco = wallet_bsc.endereco_publico()
+    except Exception:
+        return None
+    try:
+        saldo = wallet_bsc.obter_saldo_bnb()
+    except Exception:
+        saldo = None
+    return {"endereco": endereco, "saldo_bnb": saldo}
 
 
 # --------------------------------------------------------------------------

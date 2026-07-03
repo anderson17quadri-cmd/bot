@@ -520,26 +520,41 @@ async function atualizarCarteira() {
   }
   el("saldo-wallet").textContent =
     dados.saldo_sol === null ? "N/A" : dados.saldo_sol.toFixed(4) + " SOL";
+
+  // Wallet BSC (so aparece se configurada no .env)
+  const bsc = dados.bsc;
+  el("bloco-wallet-bsc").hidden = !bsc;
+  if (bsc) {
+    el("endereco-wallet-bsc").textContent = bsc.endereco;
+    el("saldo-wallet-bsc").textContent =
+      bsc.saldo_bnb === null || bsc.saldo_bnb === undefined
+        ? "N/A" : bsc.saldo_bnb.toFixed(4) + " BNB";
+  }
+  // Se so a BSC estiver configurada, esconde a parte Solana (fica so a BSC)
+  el("endereco-wallet").closest(".carteira").querySelectorAll(".qr-caixa, #endereco-wallet, #btn-copiar-endereco")
+    .forEach((elem) => { elem.style.display = dados.so_bsc ? "none" : ""; });
 }
 
 // Botao "Copiar endereco": usa a API moderna do clipboard, com fallback
 // (textarea + execCommand) para browsers/webviews mais antigos
-el("btn-copiar-endereco").addEventListener("click", async () => {
-  const endereco = el("endereco-wallet").textContent;
-  if (!endereco || endereco === "–") return;
+async function copiarTexto(texto) {
+  if (!texto || texto === "–") return;
   try {
-    await navigator.clipboard.writeText(endereco);
-    toast("Endereço copiado!", "sucesso");
+    await navigator.clipboard.writeText(texto);
   } catch {
     const caixa = document.createElement("textarea");
-    caixa.value = endereco;
+    caixa.value = texto;
     document.body.appendChild(caixa);
     caixa.select();
     document.execCommand("copy");
     caixa.remove();
-    toast("Endereço copiado!", "sucesso");
   }
-});
+  toast("Endereço copiado!", "sucesso");
+}
+el("btn-copiar-endereco").addEventListener("click",
+  () => copiarTexto(el("endereco-wallet").textContent));
+el("btn-copiar-endereco-bsc").addEventListener("click",
+  () => copiarTexto(el("endereco-wallet-bsc").textContent));
 
 /** Atualiza a caixa "Log ao vivo" com as ultimas linhas do bot.log */
 async function atualizarLog() {

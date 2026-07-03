@@ -519,6 +519,13 @@ tr:last-child td { border-bottom: none; }
 .saldo-wallet { color: var(--texto-suave); font-size: 0.85rem; }
 .saldo-wallet b { color: var(--verde); }
 
+/* Bloco da wallet BSC (dentro do cartao Carteira, separado por uma linha) */
+.wallet-bsc {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--linha-grelha);
+}
+
 /* Simbolo clicavel: abre o grafico do token (DexScreener/pump.fun) */
 .link-token {
   color: var(--texto);

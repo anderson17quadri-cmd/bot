@@ -142,6 +142,16 @@
             <button class="btn btn-pequeno btn-neutro" id="btn-copiar-endereco">Copiar endereço</button>
             <span class="saldo-wallet">Saldo: <b class="num" id="saldo-wallet">–</b></span>
           </div>
+
+          <!-- Wallet BSC (so aparece se WALLET_PRIVATE_KEY_BSC estiver definida) -->
+          <div class="wallet-bsc" id="bloco-wallet-bsc" hidden>
+            <span class="rotulo">Endereço para depósitos (BNB / rede BSC)</span>
+            <code class="endereco-wallet num" id="endereco-wallet-bsc">–</code>
+            <div class="carteira-acoes">
+              <button class="btn btn-pequeno btn-neutro" id="btn-copiar-endereco-bsc">Copiar endereço</button>
+              <span class="saldo-wallet">Saldo: <b class="num" id="saldo-wallet-bsc">–</b></span>
+            </div>
+          </div>
         </div>
       </div>
       <div class="vazio" id="vazio-carteira" hidden>
