@@ -85,6 +85,21 @@ def mostrar_alerta(dados: dict, analise_ia: dict) -> None:
     else:
         linhas.append("[dim]holders indisponiveis (falha do RPC)[/dim]")
 
+    # Liquidez bloqueada/queimada (o sinal anti-rug mais importante)
+    estado_lp = dados.get("liquidez_bloqueada", "desconhecido")
+    texto_lp = {
+        "queimada": "[green]QUEIMADA (rug impossivel via LP)[/green]",
+        "bloqueada_protocolo": "[green]gerida pelo protocolo (segura)[/green]",
+        "nao_bloqueada": "[red]NAO BLOQUEADA (criador pode sacar!)[/red]",
+    }.get(estado_lp, "[dim]desconhecida[/dim]")
+    linhas.append(f"liquidez (LP)    : {texto_lp}")
+
+    # Historico do deployer (so quando ha dados)
+    criados = dados.get("deployer_tokens_criados")
+    if criados is not None:
+        cor_dep = "red" if criados > 5 else "green"
+        linhas.append(f"deployer         : [{cor_dep}]{criados} token(s) criados em 48h[/{cor_dep}]")
+
     # Fatores de risco (a lista legivel do analyzer)
     linhas.append("")
     linhas.append("[bold]Fatores:[/bold]")
@@ -97,7 +112,12 @@ def mostrar_alerta(dados: dict, analise_ia: dict) -> None:
 
     c1 = analise_ia.get("camada1")
     if c1:
-        linhas.append(f"[bold]Camada 1 (DeepSeek)[/bold]: {c1['score']}/100 - {c1['justificacao']}")
+        # 'confianca' = quao confiante o modelo esta (dados completos = alta)
+        conf = c1.get("confianca")
+        conf_txt = f" [dim](confianca: {conf}%)[/dim]" if conf is not None else ""
+        linhas.append(
+            f"[bold]Camada 1 (DeepSeek)[/bold]: {c1['score']}/100{conf_txt} - {c1['justificacao']}"
+        )
 
     c2 = analise_ia.get("camada2")
     if c2:

@@ -74,6 +74,46 @@ def _calcular_score(dados: dict) -> tuple[int, list[str]]:
     else:
         fatores.append(f"Liquidez razoavel: ${liq:,.0f}")
 
+    # --- Liquidez bloqueada/queimada (o sinal mais forte contra rugs) ---
+    estado_lp = dados["liquidez_bloqueada"]
+    if estado_lp == "queimada":
+        score += config.BONUS_LIQUIDEZ_BLOQUEADA  # negativo -> reduz o score
+        fatores.append("LP QUEIMADO - o criador nao pode retirar a liquidez (sinal muito forte de seguranca)")
+    elif estado_lp == "bloqueada_protocolo":
+        score += config.BONUS_LIQUIDEZ_BLOQUEADA
+        fatores.append("Liquidez gerida pelo protocolo (pump.fun/pumpswap) - sem LP para o criador sacar")
+    elif estado_lp == "nao_bloqueada":
+        score += config.PESO_LIQUIDEZ_NAO_BLOQUEADA
+        fatores.append("LP NAO bloqueado - o criador pode retirar a liquidez a qualquer momento (risco de rug)")
+    else:
+        fatores.append("Estado do LP desconhecido (nao penaliza nem beneficia)")
+
+    # --- Historico do deployer (scam em serie?) ---
+    criados = dados["deployer_tokens_criados"]
+    if criados is not None:
+        if criados > config.LIMITE_DEPLOYER_TOKENS:
+            score += config.PESO_DEPLOYER_SERIAL
+            fatores.append(
+                f"Deployer criou {criados} tokens nas ultimas "
+                f"{config.DEPLOYER_JANELA_HORAS}h - padrao de scam em serie"
+            )
+        else:
+            fatores.append(
+                f"Deployer criou {criados} token(s) nas ultimas "
+                f"{config.DEPLOYER_JANELA_HORAS}h (dentro do normal)"
+            )
+
+    # --- Liquidez suspeita para a idade (informativo, sem peso no score) ---
+    # Um pool com minutos de vida e liquidez ja enorme pode ser um bot a
+    # inflacionar antes de um pump artificial. E so um INDICIO (projetos
+    # legitimos tambem lancam com liquidez grande), por isso nao mexe no
+    # score - vai como contexto para a IA e para o alerta.
+    if dados["liquidez_suspeita"]:
+        fatores.append(
+            f"Liquidez ja alta (${liq:,.0f}) com so {dados['idade_minutos']} min "
+            f"de vida - possivel inflacao artificial (indicio, nao prova)"
+        )
+
     # Garantir que o score fica sempre entre 0 e 100
     score = max(0, min(100, score))
     return score, fatores
@@ -127,7 +167,35 @@ def analisar_onchain(pool_info: dict) -> dict:
             # 5 carteiras com 15% cada = 75%, tao mau como 1 com 75%)
             top5_holders_pct = sum(h["pct"] for h in top_holders[:5])
 
-    # -------- 3) Montar o dicionario de dados do token --------
+    # -------- 3) Sinais avancados (todos tolerantes a falha) --------
+
+    # 3a) Liquidez bloqueada/queimada - "queimada" | "bloqueada_protocolo"
+    #     | "nao_bloqueada" | "desconhecido". Para pump.fun/pumpswap nao
+    #     gasta nenhuma chamada; para Raydium v4 sao 3 chamadas RPC.
+    liquidez_bloqueada = rpc.verificar_liquidez_bloqueada(
+        pool_info.get("pool_address", ""), pool_info.get("dex", "")
+    )
+
+    # 3b) Historico do deployer - SO se a liquidez passou no filtro minimo
+    #     (nao vale a pena gastar chamadas Helius em tokens que ja iam ser
+    #     descartados por liquidez baixa)
+    deployer = None
+    deployer_tokens_criados = None
+    if pool_info["liquidez_usd"] >= config.LIQUIDEZ_MINIMA_USD:
+        deployer = rpc.obter_deployer(mint)
+        if deployer:
+            deployer_tokens_criados = rpc.contar_tokens_criados(
+                deployer, janela_horas=config.DEPLOYER_JANELA_HORAS
+            )
+
+    # 3c) Liquidez suspeita para a idade (nao gasta chamadas nenhumas)
+    idade = pool_info.get("idade_minutos", -1)
+    liquidez_suspeita = (
+        0 <= idade < config.IDADE_SUSPEITA_MINUTOS
+        and pool_info["liquidez_usd"] >= config.LIQUIDEZ_SUSPEITA_USD
+    )
+
+    # -------- 4) Montar o dicionario de dados do token --------
     dados = {
         # Identificacao
         "token_simbolo": pool_info["token_simbolo"],
@@ -149,9 +217,14 @@ def analisar_onchain(pool_info: dict) -> dict:
         "top_holders": top_holders,
         "top_holder_pct": round(top_holder_pct, 2),
         "top5_holders_pct": round(top5_holders_pct, 2),
+        # Sinais avancados
+        "liquidez_bloqueada": liquidez_bloqueada,
+        "deployer": deployer,
+        "deployer_tokens_criados": deployer_tokens_criados,
+        "liquidez_suspeita": liquidez_suspeita,
     }
 
-    # -------- 4) Calcular score heuristico --------
+    # -------- 5) Calcular score heuristico --------
     score, fatores = _calcular_score(dados)
     dados["score_heuristico"] = score
     dados["fatores_risco"] = fatores

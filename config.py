@@ -87,6 +87,22 @@ PESO_LIQUIDEZ_MEDIA = 10
 LIMITE_HOLDER_ALTO = 50.0
 LIMITE_HOLDER_MEDIO = 30.0
 
+# --- Sinais avancados (liquidez bloqueada + historico do deployer) ---
+# LP numa carteira normal = o criador pode retirar a liquidez a qualquer
+# momento (rug pull classico) -> penalizacao forte
+PESO_LIQUIDEZ_NAO_BLOQUEADA = _env_int("PESO_LIQUIDEZ_NAO_BLOQUEADA", 30)
+# LP queimado/bloqueado = o sinal MAIS FORTE de seguranca -> reduz o score
+# (valor negativo: e um bonus, nao uma penalizacao)
+BONUS_LIQUIDEZ_BLOQUEADA = _env_int("BONUS_LIQUIDEZ_BLOQUEADA", -20)
+# Deployer que criou muitos tokens nas ultimas horas = scam em serie
+PESO_DEPLOYER_SERIAL = _env_int("PESO_DEPLOYER_SERIAL", 25)
+LIMITE_DEPLOYER_TOKENS = _env_int("LIMITE_DEPLOYER_TOKENS", 5)   # mais do que isto = suspeito
+DEPLOYER_JANELA_HORAS = _env_int("DEPLOYER_JANELA_HORAS", 48)    # janela de contagem
+# Liquidez "ja alta demais" para a idade do pool (sinal informativo,
+# possivel inflacao artificial antes de um pump)
+LIQUIDEZ_SUSPEITA_USD = _env_float("LIQUIDEZ_SUSPEITA_USD", 25000.0)
+IDADE_SUSPEITA_MINUTOS = _env_float("IDADE_SUSPEITA_MINUTOS", 5.0)
+
 
 # ==========================================================================
 # 6) Estado da configuracao (Fase 1)
@@ -107,6 +123,9 @@ SALDO_VIRTUAL_INICIAL = _env_float("SALDO_VIRTUAL_INICIAL", 200.0)
 WALLET_PRIVATE_KEY = _env_texto("WALLET_PRIVATE_KEY")
 MAX_TRADE_USD = _env_float("MAX_TRADE_USD", 5.0)
 SCORE_COMPRA_MAX = _env_int("SCORE_COMPRA_MAX", 20)
+# Tokens "fronteira": score acima do limiar de compra mas dentro desta
+# margem NAO sao comprados, mas entram na watchlist para decisao manual
+SCORE_WATCHLIST_MARGEM = _env_int("SCORE_WATCHLIST_MARGEM", 20)
 STOP_LOSS_PCT = _env_float("STOP_LOSS_PCT", 20.0)
 TAKE_PROFIT_MULTIPLICADOR = _env_float("TAKE_PROFIT_MULTIPLICADOR", 2.0)
 TAKE_PROFIT_VENDER_PCT = _env_float("TAKE_PROFIT_VENDER_PCT", 50.0)

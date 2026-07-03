@@ -68,6 +68,10 @@ def registar_analise(dados: dict, analise_ia: dict, comprado: bool) -> None:
     """
     registos = carregar_radar()
 
+    # Confianca da Camada 1 (se a IA correu) - ajuda a distinguir "score
+    # alto porque e arriscado" de "score alto porque faltam dados"
+    camada1 = analise_ia.get("camada1") or {}
+
     registos.insert(0, {  # insert(0, ...) = poe no INICIO (mais recente primeiro)
         "simbolo": dados.get("token_simbolo", "?"),
         "mint": dados.get("token_mint", ""),
@@ -76,6 +80,8 @@ def registar_analise(dados: dict, analise_ia: dict, comprado: bool) -> None:
         "liquidez_usd": dados.get("liquidez_usd", 0.0),
         "score": analise_ia.get("score_final", 0),
         "fonte_score": analise_ia.get("fonte_score", "heuristico"),
+        "confianca": camada1.get("confianca"),
+        "liquidez_bloqueada": dados.get("liquidez_bloqueada", "desconhecido"),
         "comprado": comprado,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
