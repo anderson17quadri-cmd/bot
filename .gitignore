@@ -28,6 +28,7 @@ vistos_recentemente.json
 bot.pid
 wallet.py.*
 gerar_wallet.py
+gerar_wallet_bsc.py
 
 # Chave de sessao do dashboard (assina os cookies de login) - NUNCA versionar
 .dashboard_secret
