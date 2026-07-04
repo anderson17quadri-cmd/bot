@@ -530,6 +530,16 @@ async function atualizarSniper() {
       `$${dados.gasto_hoje_usd.toFixed(2)} / $${dados.limite_diario_usd.toFixed(2)} gastos hoje ` +
       `(restam $${dados.restante_hoje_usd.toFixed(2)})`;
   }
+
+  // Aviso do trade-off do filtro de qualidade (momentum): so aparece
+  // quando o modo esta ligado E ha pelo menos um sinal de momentum ativo
+  const mostrarMomentum = dados.ativo && dados.momentum_ativo;
+  el("linha-sniper-momentum").hidden = !mostrarMomentum;
+  if (mostrarMomentum) {
+    el("aviso-sniper-momentum").textContent =
+      `⏱ Filtro de qualidade ativo: cada token pode demorar +${dados.momentum_janela_seg}s ` +
+      `a decidir (espera por atividade real de compra/venda), mas entra em menos tokens fracos.`;
+  }
 }
 
 el("chk-sniper").addEventListener("click", (evento) => {

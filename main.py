@@ -29,6 +29,7 @@ import posicoes
 import radar
 import watchlist
 import cooldown
+import momentum
 
 
 def avaliar_com_ia(dados: dict) -> dict:
@@ -202,6 +203,80 @@ def _passa_checklist_caveira(dados: dict) -> tuple[bool, str]:
     return True, "todas as 4 condicoes verdadeiras"
 
 
+def _passa_filtro_qualidade_caveira(dados: dict) -> tuple[bool, str]:
+    """Filtro de QUALIDADE do Caveira (ver config.py, secao 'Filtro de
+    QUALIDADE do Caveira'). Corre DEPOIS da checklist binaria rapida, e
+    e deliberadamente mais lento: espera CAVEIRA_JANELA_MOMENTUM_SEGUNDOS
+    para dar tempo a atividade real acontecer, depois consulta o mint via
+    RPC (momentum.py) para contar compras/vendas/compradores unicos.
+
+    Cada sinal desliga-se individualmente (valor 0, ou 100 no top-holder)
+    - com TODOS desligados, esta funcao e um no-op instantaneo (mesmo
+    comportamento de antes desta funcionalidade existir).
+
+    Politica de dados em falta (decisao explicita, documentada no resumo):
+    se a CHAMADA RPC falhar (disponivel=False), SALTAMOS os sinais de
+    momentum (nao bloqueiam - falha de rede nao e culpa do token). Mas se
+    a chamada TIVER sucesso e devolver zero atividade real (0 compradores,
+    0 transacoes), isso conta a serio contra o token - e exatamente o
+    sinal "nasceu e ninguem quer" que motivou este filtro.
+    """
+    algum_filtro_ativo = (
+        config.CAVEIRA_RATIO_COMPRA_VENDA_MIN > 0
+        or config.CAVEIRA_COMPRADORES_UNICOS_MIN > 0
+        or config.CAVEIRA_TRANSACOES_MIN > 0
+    )
+    top_holder_ativo = 0 < config.CAVEIRA_TOP_HOLDER_MAX_PCT < 100
+
+    # --- Concentracao do maior holder: reutiliza dados JA calculados pelo
+    # analyzer.py (sem chamada RPC extra) - por isso corre ja, antes da
+    # espera de momentum (falha rapido e barato se o holder e demasiado
+    # concentrado, sem gastar a janela de espera a toa). ---
+    if top_holder_ativo and dados.get("holders_disponivel"):
+        top_pct = dados.get("top_holder_pct", 0.0)
+        if top_pct > config.CAVEIRA_TOP_HOLDER_MAX_PCT:
+            return False, (f"holder concentrado: {top_pct:.1f}% > maximo "
+                           f"{config.CAVEIRA_TOP_HOLDER_MAX_PCT:.1f}%")
+
+    if not algum_filtro_ativo:
+        return True, "filtro de momentum desligado (todos os limiares a 0)"
+
+    mint = dados["token_mint"]
+    if config.CAVEIRA_JANELA_MOMENTUM_SEGUNDOS > 0:
+        time.sleep(config.CAVEIRA_JANELA_MOMENTUM_SEGUNDOS)
+
+    excluir = {dados["pool_address"]} if dados.get("pool_address") else set()
+    m = momentum.analisar_momentum(mint, excluir=excluir)
+
+    if not m["disponivel"]:
+        return True, "dados de momentum indisponiveis (RPC falhou) - nao bloqueia"
+
+    if config.CAVEIRA_TRANSACOES_MIN > 0 and m["transacoes_total"] < config.CAVEIRA_TRANSACOES_MIN:
+        return False, (f"so {m['transacoes_total']} transacao(oes) desde a criacao "
+                       f"(< minimo {config.CAVEIRA_TRANSACOES_MIN})")
+
+    if config.CAVEIRA_COMPRADORES_UNICOS_MIN > 0 and m["compradores_unicos"] < config.CAVEIRA_COMPRADORES_UNICOS_MIN:
+        return False, (f"so {m['compradores_unicos']} comprador(es) distinto(s) "
+                       f"(< minimo {config.CAVEIRA_COMPRADORES_UNICOS_MIN})")
+
+    if config.CAVEIRA_RATIO_COMPRA_VENDA_MIN > 0:
+        # Sem vendas nenhumas e um sinal BOM (ninguem a sair) - so exigimos
+        # o racio quando ja ha vendas para comparar.
+        if m["vendas"] > 0:
+            ratio = m["compras"] / m["vendas"]
+            if ratio < config.CAVEIRA_RATIO_COMPRA_VENDA_MIN:
+                return False, (f"racio compra/venda {ratio:.1f}x < minimo "
+                               f"{config.CAVEIRA_RATIO_COMPRA_VENDA_MIN:.1f}x "
+                               f"({m['compras']} compras vs {m['vendas']} vendas)")
+        elif m["compras"] == 0:
+            # Zero compras E zero vendas: sem atividade real nenhuma - o
+            # caso classico do token que "nasce e morre" sem ninguem tocar.
+            return False, "sem atividade de compra/venda detetada (token parado)"
+
+    return True, (f"momentum ok: {m['compras']} compras, {m['vendas']} vendas, "
+                  f"{m['compradores_unicos']} compradores distintos")
+
+
 def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     """MODO SNIPER RAPIDO ("modo caveira") - o mais arriscado dos 3 modos
     de compra do bot. Le config.py 7c) para o contexto completo.
@@ -243,7 +318,9 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
 
     valor = config.SNIPER_RAPIDO_VALOR_USD
 
-    # Limite diario OBRIGATORIO - a principal trava deste modo
+    # Limite diario OBRIGATORIO - a principal trava deste modo (verificado
+    # ANTES do filtro de qualidade, que e mais lento - nao vale a pena
+    # esperar a janela de momentum so para descobrir que o limite ja bateu)
     import sniper_rapido
     if not sniper_rapido.pode_gastar(valor):
         alerts.info(
@@ -251,6 +328,15 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
             f"(restam ${sniper_rapido.restante_hoje_usd():.2f})[/dim]"
         )
         return False
+
+    # Filtro de QUALIDADE (momentum) - o mais lento dos checks deste modo
+    # (pode esperar alguns segundos + chamadas RPC extra), por isso corre
+    # por ultimo, so depois de todos os checks baratos terem passado.
+    passou_qualidade, motivo_qualidade = _passa_filtro_qualidade_caveira(dados)
+    if not passou_qualidade:
+        alerts.info(f"[dim][💀 sniper] {simbolo} reprovado no filtro de qualidade: {motivo_qualidade}[/dim]")
+        return False
+    alerts.info(f"[dim][💀 sniper] {simbolo}: {motivo_qualidade}[/dim]")
 
     if config.DRY_RUN:
         import carteira
@@ -663,6 +749,11 @@ def processar_pool(pool: dict) -> None:
         dados = analyzer_bsc.analisar(pool)
     else:
         dados = analyzer.analisar_onchain(pool)
+    # Enriquece 'dados' com o endereco do pool/curva (nao vem do analyzer,
+    # so do detector) - usado pelo filtro de qualidade do Caveira e pela
+    # deteccao de reversao (momentum.py) para saber que conta excluir da
+    # contagem de compradores (o pool nao e um "comprador").
+    dados["pool_address"] = pool.get("pool_address")
 
     # Marca este mint como "analisado agora" - so depois de decidirmos
     # mesmo prosseguir com a analise (nao antes do cooldown-check acima)

@@ -344,6 +344,33 @@ SNIPER_RAPIDO_SCORE_VENDA_URGENTE = _env_int("SNIPER_RAPIDO_SCORE_VENDA_URGENTE"
 LIQUIDEZ_MINIMA_CAVEIRA_USD = _env_float("LIQUIDEZ_MINIMA_CAVEIRA_USD", 1000.0)
 IDADE_MAXIMA_CAVEIRA_SEGUNDOS = _env_int("IDADE_MAXIMA_CAVEIRA_SEGUNDOS", 60)
 
+# --- Filtro de QUALIDADE do Caveira (momentum.py) ----------------------
+# A checklist binaria acima (autoridades+liquidez+idade) filtra scams
+# TECNICOS, mas nao filtra qualidade: a maioria dos tokens do pump.fun
+# passa essas 4 condicoes nos primeiros segundos, incluindo os que vao
+# morrer sem ninguem comprar. Estes sinais extra pedem alguma atividade
+# REAL (compras > vendas, varios compradores distintos, holder nao
+# concentrado, algumas transacoes ja feitas) antes de entrar.
+# TRADE-OFF DELIBERADO: para reunir estes dados esperamos alguns segundos
+# apos a deteccao (CAVEIRA_JANELA_MOMENTUM_SEGUNDOS) e fazemos chamadas
+# RPC extra - o Caveira fica mais LENTO mas mais SELETIVO. Cada sinal
+# desliga-se individualmente pondo o valor a 0 (ou 100 no caso do
+# top-holder) se preferires velocidade pura (comportamento antigo).
+CAVEIRA_JANELA_MOMENTUM_SEGUNDOS = _env_float("CAVEIRA_JANELA_MOMENTUM_SEGUNDOS", 5.0)
+# Minimo de compras por cada venda (ex: 2.0 = pelo menos o dobro de
+# compras que vendas). 0 desliga este filtro.
+CAVEIRA_RATIO_COMPRA_VENDA_MIN = _env_float("CAVEIRA_RATIO_COMPRA_VENDA_MIN", 2.0)
+# Minimo de enderecos DISTINTOS a comprar (evita 1-2 wallets a inflacionar
+# artificialmente o volume). 0 desliga este filtro.
+CAVEIRA_COMPRADORES_UNICOS_MIN = _env_int("CAVEIRA_COMPRADORES_UNICOS_MIN", 3)
+# Se o maior holder detiver mais do que isto (%), rejeita mesmo que passe
+# tudo o resto. Reutiliza o dado que o analyzer.py ja calculou (sem
+# chamadas RPC extra). <= 0 desliga este filtro.
+CAVEIRA_TOP_HOLDER_MAX_PCT = _env_float("CAVEIRA_TOP_HOLDER_MAX_PCT", 35.0)
+# Minimo de transacoes ja feitas desde a criacao (evita comprar no
+# proprio bloco de criacao, antes de qualquer interesse real). 0 desliga.
+CAVEIRA_TRANSACOES_MIN = _env_int("CAVEIRA_TRANSACOES_MIN", 5)
+
 
 def fase2_configurada() -> bool:
     return bool(WALLET_PRIVATE_KEY)

@@ -1010,6 +1010,15 @@ def api_sniper():
         "limite_diario_usd": config.SNIPER_RAPIDO_LIMITE_DIARIO_USD,
         "gasto_hoje_usd": round(sniper_rapido.gasto_hoje_usd(), 2),
         "restante_hoje_usd": round(sniper_rapido.restante_hoje_usd(), 2),
+        # Filtro de qualidade (momentum) - para o dashboard mostrar o
+        # trade-off de velocidade junto ao toggle
+        "momentum_janela_seg": config.CAVEIRA_JANELA_MOMENTUM_SEGUNDOS,
+        "momentum_ativo": (
+            config.CAVEIRA_RATIO_COMPRA_VENDA_MIN > 0
+            or config.CAVEIRA_COMPRADORES_UNICOS_MIN > 0
+            or config.CAVEIRA_TRANSACOES_MIN > 0
+            or 0 < config.CAVEIRA_TOP_HOLDER_MAX_PCT < 100
+        ),
     })
 
 
