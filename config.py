@@ -125,6 +125,20 @@ JITO_BLOCK_ENGINE_URL = _env_texto(
 # lamports (~0.0001 SOL) e um ponto de partida razoavel.
 JITO_TIP_LAMPORTS = _env_int("JITO_TIP_LAMPORTS", 100_000)
 
+# --- Copy Trading (seguir carteiras "top") -----------------------------
+# Segue uma lista MANUAL de carteiras; quando uma delas COMPRA um token, o
+# bot replica (valor pequeno e fixo) apos uma verificacao minima. E um 4o
+# caminho de compra dedicado, isolado dos outros 3. DESLIGADO por defeito.
+COPY_TRADE_ATIVO = _env_texto("COPY_TRADE_ATIVO", "false").lower() in ("1", "true", "yes", "sim")
+# Carteiras a seguir, separadas por virgula (enderecos Solana base58).
+COPY_TRADE_WALLETS = _env_texto("COPY_TRADE_WALLETS", "")
+# Valor (USD) de cada compra copiada.
+COPY_TRADE_VALOR_USD = _env_float("COPY_TRADE_VALOR_USD", 1.0)
+# Limite diario OBRIGATORIO (USD) - conter o dano de copiar um dia mau.
+COPY_TRADE_LIMITE_DIARIO_USD = _env_float("COPY_TRADE_LIMITE_DIARIO_USD", 10.0)
+# De quantos em quantos segundos sondar cada carteira por transacoes novas.
+COPY_TRADE_INTERVALO_SEGUNDOS = _env_int("COPY_TRADE_INTERVALO_SEGUNDOS", 5)
+
 # --- Multi-chain (Parte B) ---------------------------------------------
 # REDE fica como a rede "principal"/legada (Solana) para o codigo antigo
 # que ainda a referencia. REDES_ATIVAS e a lista de redes a monitorizar
@@ -348,6 +362,7 @@ def resumo() -> str:
         f"Camada 2 Claude   : {'ON (' + ANTHROPIC_MODEL + ')' if camada2_configurada() else 'OFF (opcional)'}",
         f"Fase 2 (trading)  : {'ON, DRY_RUN=' + str(DRY_RUN) if fase2_configurada() else 'OFF (sem WALLET_PRIVATE_KEY)'}",
         f"Envio Jito        : {'ON (tip ' + str(JITO_TIP_LAMPORTS) + ' lamports)' if JITO_ATIVO else 'OFF (envio normal pelo RPC)'}",
+        f"Copy Trading      : {'ON (' + str(len([w for w in COPY_TRADE_WALLETS.split(',') if w.strip()])) + ' carteira(s))' if COPY_TRADE_ATIVO else 'OFF'}",
     ]
     return "\n".join(linhas)
 

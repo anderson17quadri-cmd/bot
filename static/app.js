@@ -557,6 +557,58 @@ el("btn-sniper-confirmar").addEventListener("click", async () => {
   atualizarSniper();
 });
 
+// --- Toggle do Copy Trading (replicar carteiras seguidas) ---
+async function atualizarCopy() {
+  const dados = await (await fetch("/api/copy")).json();
+  el("chk-copy").checked = dados.ativo;
+  el("aviso-copy").hidden = !dados.ativo;
+  el("copy-carteiras-preview").textContent = dados.n_carteiras;
+  el("copy-valor-preview").textContent = "$" + dados.valor_usd.toFixed(2);
+  el("copy-limite-preview").textContent = "$" + dados.limite_diario_usd.toFixed(2);
+
+  el("linha-copy-orcamento").hidden = !dados.ativo;
+  if (dados.ativo) {
+    const pct = dados.limite_diario_usd > 0
+      ? Math.min(100, (dados.gasto_hoje_usd / dados.limite_diario_usd) * 100) : 0;
+    el("orcamento-copy-barra").style.width = pct + "%";
+    el("orcamento-copy-barra").classList.toggle("cheio", pct >= 90);
+    el("orcamento-copy-texto").textContent =
+      `$${dados.gasto_hoje_usd.toFixed(2)} / $${dados.limite_diario_usd.toFixed(2)} gastos hoje ` +
+      `(restam $${dados.restante_hoje_usd.toFixed(2)})`;
+  }
+}
+
+el("chk-copy").addEventListener("click", (evento) => {
+  if (evento.target.checked) {
+    evento.preventDefault(); // so liga depois do CONFIRMO
+    el("input-copy-confirmo").value = "";
+    el("btn-copy-confirmar").disabled = true;
+    abrirModal("modal-copy-confirmo");
+    el("input-copy-confirmo").focus();
+  } else {
+    pedirAcao("/api/copy", { ativo: false }).then(() => {
+      toast("Copy Trading desligado.", "sucesso");
+      atualizarCopy();
+    });
+  }
+});
+
+el("input-copy-confirmo").addEventListener("input", () => {
+  el("btn-copy-confirmar").disabled = el("input-copy-confirmo").value.trim() !== "CONFIRMO";
+});
+el("btn-copy-confirmar").addEventListener("click", async () => {
+  const r = await pedirAcao("/api/copy", {
+    ativo: true, confirmacao: el("input-copy-confirmo").value.trim(),
+  });
+  fecharModais();
+  if (r.ok) {
+    toast("👥 Copy Trading ATIVADO" + (r.precisa_reiniciar ? " — reinicia o bot para aplicar." : "."), "sucesso");
+  } else {
+    toast(r.erro || "Não foi possível ativar.", "erro");
+  }
+  atualizarCopy();
+});
+
 // --- Toggle SIMULADO/REAL (controlo segmentado) ---
 
 /** Pede ao backend para mudar o modo no .env */
@@ -915,6 +967,8 @@ async function atualizarPosicoes() {
       ? ' <span class="tag curva">BONDING CURVE</span>' : "";
     // 💀 Comprado pelo Modo Sniper Rapido (sem esperar pela IA)
     const tagSniper = p.sniper_rapido ? ' <span class="tag sniper" title="Comprado pelo Modo Sniper Rápido">💀 SNIPER</span>' : "";
+    // 👥 Comprado por Copy Trading (replicou uma carteira seguida)
+    const tagCopy = p.copy ? ' <span class="tag copy" title="Comprado por Copy Trading">👥 COPY</span>' : "";
     // Badge MANUAL: acompanhamento automatico desligado nesta posicao
     const auto = p.gestao_automatica !== false;
     const tagManual = auto ? "" : ' <span class="tag manual">MANUAL</span>';
@@ -922,7 +976,7 @@ async function atualizarPosicoes() {
     // Abreviado (K/M/B/T) com o valor exato no title (hover/tooltip)
     const qtdExata = p.quantidade_tokens.toLocaleString("pt-PT", { maximumFractionDigits: 0 });
     return `<tr>
-      <td>${linkToken(p.mint, p.simbolo, p.dex, p.chain)}${tagChain(p.chain)}${tagCurva}${tagSniper}${tagManual}</td>
+      <td>${linkToken(p.mint, p.simbolo, p.dex, p.chain)}${tagChain(p.chain)}${tagCurva}${tagSniper}${tagCopy}${tagManual}</td>
       <td>${dinheiro(p.valor_investido_usd)}</td>
       <td>${precoUnitario(p.preco_compra_por_token_usd ?? p.preco_compra_usd)}</td>
       <td><span title="${qtdExata}">${abreviarQuantidade(p.quantidade_tokens)}</span></td>
@@ -1122,6 +1176,7 @@ async function atualizarTudo() {
       atualizarTokensCarteira(),
       atualizarCurva(),
       atualizarSniper(),
+      atualizarCopy(),
     ]);
     el("ultima-atualizacao").textContent =
       "Atualizado às " + new Date().toLocaleTimeString("pt-PT");

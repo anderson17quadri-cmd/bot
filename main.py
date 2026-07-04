@@ -309,6 +309,76 @@ def vender_sniper_se_score_mau(dados: dict, analise_ia: dict) -> None:
         alerts.info(f"[red]💀 [sniper] falha na venda de urgencia:[/red] {e}")
 
 
+def tentar_copy_trade(sinal: dict) -> None:
+    """COPY TRADING - replica uma compra detetada numa carteira seguida.
+
+    4o caminho de compra dedicado, isolado dos outros 3: NUNCA olha para
+    score, MAX_TRADE_USD nem analise_ia. So Solana/Jupiter. A entrada nao
+    e um pool detetado, e um sinal {mint, carteira} vindo do copy_trade.
+
+    Verificacao MINIMA de seguranca antes de comprar: mint e freeze
+    authority revogadas (o basico contra rug/congelamento). Limite diario
+    OBRIGATORIO, tal como o modo sniper. Nunca deixa uma falha derrubar
+    o bot."""
+    if not config.COPY_TRADE_ATIVO or not config.fase2_configurada():
+        return
+
+    mint = sinal.get("mint")
+    if not mint or mint in posicoes.listar_posicoes_abertas():
+        return  # sem mint, ou ja ha posicao neste token (de qualquer modo)
+
+    valor = config.COPY_TRADE_VALOR_USD
+
+    import copy_trade
+    if not copy_trade.pode_gastar(valor):
+        alerts.info(
+            f"[dim][COPY] limite diario atingido "
+            f"(restam ${copy_trade.restante_hoje_usd():.2f})[/dim]"
+        )
+        return
+
+    # Verificacao minima de seguranca on-chain: autoridades revogadas
+    import rpc
+    try:
+        info = rpc.get_mint_info(mint)
+    except Exception:
+        info = None
+    if not info:
+        alerts.info(f"[dim][COPY] {mint[:8]}... sem dados on-chain - ignorado[/dim]")
+        return
+    if info.get("mint_authority") is not None or info.get("freeze_authority") is not None:
+        alerts.info(f"[dim][COPY] {mint[:8]}... reprovado (mint/freeze authority ativa)[/dim]")
+        return
+
+    decimais = info.get("decimais")
+    simbolo = "COPY:" + mint[:4]
+    carteira_seguida = sinal.get("carteira", "?")
+
+    if config.DRY_RUN:
+        import carteira
+        if carteira.saldo_disponivel() < valor:
+            return
+
+    try:
+        preco_sol_usd = obter_preco_sol_usd()
+        r = executor.comprar_token(mint=mint, simbolo=simbolo, valor_usd=valor,
+                                   preco_sol_usd=preco_sol_usd, decimais=decimais)
+        if r.get("sucesso"):
+            posicoes.atualizar_posicao(mint, copy=True, copy_carteira=carteira_seguida)
+            if config.DRY_RUN:
+                import carteira
+                carteira.marcar_ultima_compra(mint, copy=True)
+            copy_trade.registar_gasto(valor)
+            alerts.info(
+                f"[bold cyan][COPY] {r['mensagem']} "
+                f"(copiou {carteira_seguida[:8]}...)[/bold cyan]"
+            )
+            return
+        alerts.info(f"[yellow][COPY] falha ao comprar {mint[:8]}...: {r.get('mensagem')}[/yellow]")
+    except Exception as e:
+        alerts.info(f"[red][COPY] erro a comprar {mint[:8]}...:[/red] {e}")
+
+
 def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
     """Compra na BSC (via PancakeSwap), o equivalente ao tentar_comprar da
     Solana. Precisa da wallet BSC configurada; usa o limite BSC_MAX_TRADE_USD.
@@ -672,6 +742,27 @@ def main() -> None:
         except Exception as e:
             alerts.info(f"[red]Nao consegui iniciar a deteccao WebSocket:[/red] {e}")
     alerts.console.print(f"[dim]Metodo(s) de deteccao: {', '.join(metodos) or 'polling'}[/dim]\n")
+
+    # Copy Trading (opcional): monitor das carteiras seguidas, em thread
+    # de fundo. So arranca com o toggle ligado, wallet configurada e pelo
+    # menos uma carteira na lista. Isolado dos detetores de pools.
+    copiador = None
+    if config.COPY_TRADE_ATIVO and config.fase2_configurada():
+        try:
+            import copy_trade
+            import rate_limiter
+            carteiras = copy_trade.carteiras_configuradas()
+            if carteiras:
+                limitador = rate_limiter.RateLimiter(config.RPC_MAX_PEDIDOS_POR_SEGUNDO)
+                copiador = copy_trade.CopyTrader(carteiras, limitador=limitador)
+                alerts.console.print(
+                    f"[dim]Copy Trading ativo: a seguir {len(carteiras)} carteira(s).[/dim]"
+                )
+            else:
+                alerts.info("[yellow]Copy Trading ligado mas sem carteiras (COPY_TRADE_WALLETS vazio).[/yellow]")
+        except Exception as e:
+            alerts.info(f"[red]Nao consegui iniciar o Copy Trading:[/red] {e}")
+
     ciclo = 0
     ultima_verificacao_posicoes = 0.0
 
@@ -692,6 +783,15 @@ def main() -> None:
         # stop-loss de um token que despenca logo apos a compra disparar
         # depressa. Vale para TODOS os modos de compra (normal/curva/caveira).
         posicoes_antes = len(posicoes.listar_posicoes_abertas()) if config.fase2_configurada() else 0
+
+        # Copy Trading: replica as compras detetadas nas carteiras seguidas.
+        # Caminho totalmente separado do pipeline de analise dos pools.
+        if copiador is not None:
+            try:
+                for sinal in copiador.buscar_sinais():
+                    tentar_copy_trade(sinal)
+            except Exception as e:
+                alerts.info(f"[red]Erro no Copy Trading:[/red] {e}")
 
         if not novos:
             alerts.info(f"[dim]ciclo {ciclo}: sem tokens novos. A aguardar {config.POLL_INTERVAL_SEGUNDOS}s...[/dim]")

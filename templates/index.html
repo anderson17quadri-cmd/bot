@@ -93,6 +93,23 @@
       </div>
     </div>
 
+    <!-- Toggle Copy Trading: replicar compras de carteiras seguidas -->
+    <div class="topo-linha linha-curva linha-copy">
+      <label class="switch-curva">
+        <input type="checkbox" id="chk-copy">
+        <span class="switch-visual switch-copy"></span>
+        <span class="switch-texto">👥 Copy Trading</span>
+      </label>
+      <span class="aviso-curva" id="aviso-copy" hidden>⚠ copia compras de carteiras alheias</span>
+    </div>
+    <!-- Barra do limite diario do copy - so aparece quando ligado -->
+    <div class="topo-linha linha-sniper-orcamento" id="linha-copy-orcamento" hidden>
+      <div class="orcamento-sniper">
+        <div class="orcamento-barra"><div class="orcamento-preenchido" id="orcamento-copy-barra"></div></div>
+        <span class="orcamento-texto" id="orcamento-copy-texto">$0,00 / $0,00 gastos hoje</span>
+      </div>
+    </div>
+
     <div class="topo-linha">
       <!-- Indicador de estado do bot: bolinha pulsante + texto -->
       <div class="estado-bot" id="estado-bot">
@@ -485,6 +502,26 @@
       <div class="modal-botoes">
         <button class="btn btn-neutro" data-fechar>Cancelar</button>
         <button class="btn btn-perigo" id="btn-sniper-confirmar" disabled>Ativar modo sniper</button>
+      </div>
+    </div>
+
+    <!-- Modal: ativar Copy Trading (replicar carteiras seguidas) -->
+    <div class="modal" id="modal-copy-confirmo" hidden>
+      <h3 class="perigo">👥 Ativar Copy Trading</h3>
+      <p class="texto-perigo">
+        O bot vai <b>replicar as compras</b> das carteiras que segues
+        (<b id="copy-carteiras-preview">0</b> configurada(s) em
+        <span class="num">COPY_TRADE_WALLETS</span>), com uma verificação
+        mínima de segurança. Cada cópia gasta
+        <b id="copy-valor-preview">$0,00</b>; limite diário
+        <b id="copy-limite-preview">$0,00</b>. Segues o risco de quem copias.
+      </p>
+      <p>Escreve <b class="num">CONFIRMO</b> para ativar:</p>
+      <input type="text" id="input-copy-confirmo" class="campo-texto num"
+             autocomplete="off" autocapitalize="characters" placeholder="CONFIRMO">
+      <div class="modal-botoes">
+        <button class="btn btn-neutro" data-fechar>Cancelar</button>
+        <button class="btn btn-perigo" id="btn-copy-confirmar" disabled>Ativar copy trading</button>
       </div>
     </div>
 

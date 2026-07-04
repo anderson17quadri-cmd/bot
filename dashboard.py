@@ -423,6 +423,7 @@ def api_posicoes():
             "dry_run": p.get("dry_run", True),
             "origem": p.get("origem"),  # "bonding_curve" ou None (compra normal)
             "sniper_rapido": bool(p.get("sniper_rapido", False)),
+            "copy": bool(p.get("copy", False)),  # comprado por Copy Trading
             "chain": p.get("chain", "solana"),  # "solana" ou "bsc"
             # Acompanhamento automatico ligado? (defeito True; False = so manual)
             "gestao_automatica": p.get("gestao_automatica", True),
@@ -928,6 +929,51 @@ def api_sniper_toggle():
         }), 400
 
     _escrever_bool_no_env("SNIPER_RAPIDO_ATIVO", ativar)
+    a_correr, _ = _estado_bot()
+    return jsonify({"ok": True, "ativo": ativar, "precisa_reiniciar": a_correr})
+
+
+@app.route("/api/copy")
+def api_copy():
+    """Estado do Copy Trading: toggle, carteiras seguidas, valor por copia
+    e quanto ja gastou hoje do limite diario obrigatorio."""
+    import copy_trade
+    carteiras = copy_trade.carteiras_configuradas()
+    return jsonify({
+        "ativo": _ler_bool_do_env("COPY_TRADE_ATIVO", False),
+        "carteiras": carteiras,
+        "n_carteiras": len(carteiras),
+        "valor_usd": config.COPY_TRADE_VALOR_USD,
+        "limite_diario_usd": config.COPY_TRADE_LIMITE_DIARIO_USD,
+        "gasto_hoje_usd": round(copy_trade.gasto_hoje_usd(), 2),
+        "restante_hoje_usd": round(copy_trade.restante_hoje_usd(), 2),
+    })
+
+
+@app.route("/api/copy", methods=["POST"])
+def api_copy_toggle():
+    """Liga/desliga o Copy Trading. Ligar exige a palavra CONFIRMO (mesmo
+    padrao dos outros modos de compra) E pelo menos uma carteira na lista
+    COPY_TRADE_WALLETS. Desligar e livre."""
+    corpo = request.get_json(silent=True) or {}
+    if "ativo" not in corpo:
+        return jsonify({"ok": False, "erro": "Pedido inválido: falta 'ativo'."}), 400
+    ativar = bool(corpo["ativo"])
+
+    if ativar:
+        if corpo.get("confirmacao") != "CONFIRMO":
+            return jsonify({
+                "ok": False,
+                "erro": "Ativar o Copy Trading exige escrever CONFIRMO — replica compras de carteiras alheias.",
+            }), 400
+        import copy_trade
+        if not copy_trade.carteiras_configuradas():
+            return jsonify({
+                "ok": False,
+                "erro": "Sem carteiras para seguir. Preenche COPY_TRADE_WALLETS no .env primeiro.",
+            }), 400
+
+    _escrever_bool_no_env("COPY_TRADE_ATIVO", ativar)
     a_correr, _ = _estado_bot()
     return jsonify({"ok": True, "ativo": ativar, "precisa_reiniciar": a_correr})
 
