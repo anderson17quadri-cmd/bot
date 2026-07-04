@@ -59,12 +59,15 @@ def _guardar(registos: list) -> None:
     os.replace(tmp, FICHEIRO_RADAR)
 
 
-def registar_analise(dados: dict, analise_ia: dict, comprado: bool) -> None:
+def registar_analise(dados: dict, analise_ia: dict, comprado: bool, modo: str | None = None) -> None:
     """Acrescenta um token analisado ao topo do radar.
 
     'dados'      -> o dicionario do analyzer.analisar_onchain()
     'analise_ia' -> o resultado do avaliar_com_ia() do main.py
     'comprado'   -> True se o bot decidiu entrar neste token
+    'modo'       -> qual dos 4 modos comprou (so faz sentido se comprado=True;
+                    None nos restantes - o filtro por modo do dashboard trata
+                    "sem modo" como "nao pertence a nenhum modo especifico")
     """
     registos = carregar_radar()
 
@@ -85,6 +88,7 @@ def registar_analise(dados: dict, analise_ia: dict, comprado: bool) -> None:
         "confianca": camada1.get("confianca"),
         "liquidez_bloqueada": dados.get("liquidez_bloqueada", "desconhecido"),
         "comprado": comprado,
+        "modo": modo if comprado else None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 

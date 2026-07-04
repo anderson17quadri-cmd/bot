@@ -84,7 +84,9 @@ def _sanidade_ok(valor_usd: float, operacao: str, simbolo: str) -> bool:
 def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
                     preco_unitario_usd: float | None = None,
                     quantidade_tokens: float | None = None,
-                    chain: str = "solana") -> bool:
+                    chain: str = "solana",
+                    dex: str | None = None,
+                    modo: str = "normal") -> bool:
     """Debita o valor da compra do saldo virtual. Devolve False (e nao
     debita nada) se nao houver saldo suficiente OU se o valor falhar a
     verificacao de sanidade (protecao contra bugs de unidades).
@@ -93,6 +95,10 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
       mint               -> para o dashboard abrir o grafico do token
       preco_unitario_usd -> preco pago por unidade minima do token
       quantidade_tokens  -> quantas unidades minimas foram compradas
+      dex                -> plataforma/DEX de origem (pump-fun, raydium...)
+      modo               -> qual dos 4 modos de compra fez esta operacao
+                            (normal|bonding_curve|sniper_rapido|copy_trading)
+                            - usado pelas estatisticas "por modo"/"por DEX"
     Assim o historico fica completo mesmo depois de a posicao fechar."""
     if not _sanidade_ok(valor_usd, "compra", simbolo):
         return False
@@ -104,7 +110,7 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
     dados["saldo_atual_usd"] -= valor_usd
     dados["historico"].append({
         "tipo": "compra", "simbolo": simbolo, "valor_usd": valor_usd,
-        "mint": mint, "chain": chain,
+        "mint": mint, "chain": chain, "dex": dex, "modo": modo,
         "preco_unitario_usd": preco_unitario_usd,
         "quantidade_tokens": quantidade_tokens,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -119,7 +125,9 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
                    preco_venda_usd: float | None = None,
                    quantidade_tokens: float | None = None,
                    chain: str = "solana",
-                   sniper_rapido: bool = False) -> bool:
+                   sniper_rapido: bool = False,
+                   dex: str | None = None,
+                   modo: str | None = None) -> bool:
     """Credita o valor recebido da venda no saldo virtual e regista o
     lucro/prejuizo realizado dessa operacao. Devolve False (e nao mexe
     no saldo) se o valor falhar a verificacao de sanidade - protecao
@@ -133,9 +141,17 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
     Os campos extra (opcionais) preservam o que a posicao sabia ANTES
     de ser apagada pelo fechar_posicao(): o mint, o preco a que se
     comprou, o preco a que se vendeu e a quantidade vendida - sem isto,
-    fechada a posicao, esses dados perdiam-se para sempre."""
+    fechada a posicao, esses dados perdiam-se para sempre.
+
+    'dex'/'modo': mesmo par usado em registar_compra, para as estatisticas
+    do dashboard conseguirem juntar compra+venda do mesmo modo/plataforma.
+    'modo' sem valor explicito e deduzido de 'sniper_rapido' (compat com
+    chamadas antigas que so passavam esse booleano)."""
     if not _sanidade_ok(valor_recebido_usd, "venda", simbolo):
         return False
+
+    if modo is None:
+        modo = "sniper_rapido" if sniper_rapido else "normal"
 
     dados = _carregar()
     lucro = valor_recebido_usd - valor_investido_usd
@@ -143,7 +159,7 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
     dados["historico"].append({
         "tipo": "venda", "simbolo": simbolo,
         "valor_usd": valor_recebido_usd, "lucro_usd": round(lucro, 4),
-        "mint": mint, "chain": chain,
+        "mint": mint, "chain": chain, "dex": dex, "modo": modo,
         "preco_compra_usd": preco_compra_usd,
         "preco_venda_usd": preco_venda_usd,
         "quantidade_tokens": quantidade_tokens,

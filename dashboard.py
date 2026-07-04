@@ -527,6 +527,8 @@ def api_posicoes():
             "sniper_rapido": bool(p.get("sniper_rapido", False)),
             "copy": bool(p.get("copy", False)),  # comprado por Copy Trading
             "chain": p.get("chain", "solana"),  # "solana" ou "bsc"
+            "dex": p.get("dex"),  # plataforma de origem (pump-fun/raydium/...)
+            "modo": p.get("modo", "normal"),  # para o filtro por modo do dashboard
             # Acompanhamento automatico ligado? (defeito True; False = so manual)
             "gestao_automatica": p.get("gestao_automatica", True),
             "valor_atual_usd": round(valor_atual, 2) if valor_atual is not None else None,
@@ -543,6 +545,75 @@ def api_radar():
     """Devolve os ultimos tokens que o bot detetou e analisou (o radar.py
     ja guarda com o mais recente primeiro e limitado a 50 registos)."""
     return jsonify({"radar": _ler_radar()})
+
+
+# Rotulos legiveis dos 4 modos de compra (mesma ordem em toda a UI)
+_MODOS_CONHECIDOS = ["normal", "bonding_curve", "sniper_rapido", "copy_trading"]
+_DEX_DESCONHECIDO = "desconhecido"
+
+
+def _agrupar_desempenho(historico: list, campo: str, chaves_conhecidas: list | None = None) -> list:
+    """Agrupa o historico de compras/vendas por 'campo' (dex ou modo) e
+    calcula metricas simples por grupo: nº compras, nº vendas, win rate
+    (so entre as vendas) e lucro/prejuizo total (soma de lucro_usd).
+
+    Entradas ANTIGAS do historico (antes desta funcionalidade existir) nao
+    tem 'dex'/'modo' - caem no grupo 'desconhecido'/'normal' em vez de
+    desaparecerem das estatisticas."""
+    grupos: dict = {}
+
+    def _chave(h):
+        valor = h.get(campo)
+        if valor:
+            return valor
+        return "normal" if campo == "modo" else _DEX_DESCONHECIDO
+
+    for h in historico:
+        chave = _chave(h)
+        g = grupos.setdefault(chave, {"n_compras": 0, "n_vendas": 0, "vendas_lucro": 0, "lucro_total": 0.0})
+        if h.get("tipo") == "compra":
+            g["n_compras"] += 1
+        elif h.get("tipo") == "venda":
+            g["n_vendas"] += 1
+            lucro = h.get("lucro_usd", 0.0) or 0.0
+            g["lucro_total"] += lucro
+            if lucro > 0:
+                g["vendas_lucro"] += 1
+
+    # Ordem estavel: primeiro as chaves conhecidas (ordem fixa), depois o
+    # resto por ordem alfabetica - evita a lista "saltar" a cada refresh
+    todas_chaves = list(grupos.keys())
+    conhecidas = [c for c in (chaves_conhecidas or []) if c in grupos]
+    resto = sorted(c for c in todas_chaves if c not in conhecidas)
+
+    resultado = []
+    for chave in conhecidas + resto:
+        g = grupos[chave]
+        win_rate = (g["vendas_lucro"] / g["n_vendas"] * 100) if g["n_vendas"] else None
+        resultado.append({
+            "chave": chave,
+            "n_compras": g["n_compras"],
+            "n_vendas": g["n_vendas"],
+            "win_rate": round(win_rate, 1) if win_rate is not None else None,
+            "lucro_total": round(g["lucro_total"], 2),
+        })
+    return resultado
+
+
+@app.route("/api/estatisticas")
+def api_estatisticas():
+    """Desempenho separado por MODO de compra (Normal/Bonding Curve/Sniper
+    Rapido/Copy Trading) e por PLATAFORMA/DEX (pump-fun/raydium/...).
+
+    So usa carteira.json (a carteira VIRTUAL) - tal como o resto do
+    /api/resumo, isto reflete a atividade em DRY_RUN. Em modo REAL o
+    carteira.json nao e tocado (ver nota em executor_bsc.py), por isso
+    estas estatisticas continuam a refletir so o SIMULADO."""
+    historico = _ler_carteira().get("historico", [])
+    return jsonify({
+        "por_modo": _agrupar_desempenho(historico, "modo", _MODOS_CONHECIDOS),
+        "por_dex": _agrupar_desempenho(historico, "dex"),
+    })
 
 
 # --------------------------------------------------------------------------
@@ -763,11 +834,15 @@ def api_comprar():
     simbolo = (entrada or {}).get("simbolo") or corpo.get("simbolo") or "?"
     # A chain vem da watchlist (BSC vs Solana) - decide o executor certo
     chain = (entrada or {}).get("chain") or corpo.get("chain") or "solana"
+    # dex so para as estatisticas do dashboard; modo "normal" porque uma
+    # compra manual da watchlist usa o mesmo caminho de execucao normal,
+    # so saltou o gate automatico do score (decisao humana em vez do bot)
+    dex = (entrada or {}).get("dex")
 
     try:
         if chain == "bsc":
             import executor_bsc
-            resultado = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD)
+            resultado = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD, dex=dex)
         else:
             executor = _carregar_executor()
             # Preco do SOL para converter MAX_TRADE_USD em lamports
@@ -776,6 +851,7 @@ def api_comprar():
             resultado = executor.comprar_token(
                 mint=mint, simbolo=simbolo,
                 valor_usd=config.MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
+                dex=dex, modo="normal",
             )
     except ImportError:
         return jsonify({"ok": False, "erro": "Dependências do bot em falta (solders/eth-account) — instala requirements.txt."}), 500

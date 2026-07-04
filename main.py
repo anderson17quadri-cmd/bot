@@ -347,7 +347,8 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
         preco_sol_usd = obter_preco_sol_usd()
         r = executor.comprar_token(mint=mint, simbolo=simbolo,
                                    valor_usd=valor, preco_sol_usd=preco_sol_usd,
-                                   decimais=dados.get("decimais"))
+                                   decimais=dados.get("decimais"),
+                                   dex=dados.get("dex"), modo="sniper_rapido")
         if r.get("sucesso"):
             posicoes.atualizar_posicao(mint, sniper_rapido=True)
             if config.DRY_RUN:
@@ -449,7 +450,8 @@ def tentar_copy_trade(sinal: dict) -> None:
     try:
         preco_sol_usd = obter_preco_sol_usd()
         r = executor.comprar_token(mint=mint, simbolo=simbolo, valor_usd=valor,
-                                   preco_sol_usd=preco_sol_usd, decimais=decimais)
+                                   preco_sol_usd=preco_sol_usd, decimais=decimais,
+                                   modo="copy_trading")
         if r.get("sucesso"):
             posicoes.atualizar_posicao(mint, copy=True, copy_carteira=carteira_seguida)
             if config.DRY_RUN:
@@ -495,7 +497,8 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
 
     try:
         import executor_bsc
-        r = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD)
+        r = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD,
+                                       dex=dados.get("dex"))
         cor = "green" if r.get("sucesso") else "yellow"
         alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
     except Exception as e:
@@ -560,6 +563,7 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
             mint=mint, simbolo=simbolo,
             valor_usd=config.MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
             decimais=dados.get("decimais"),
+            dex=dados.get("dex"), modo="normal",
         )
         etiqueta = "[SIMULADO]" if resultado["dry_run"] else "[REAL]"
         alerts.info(f"[green]{etiqueta} COMPRA: {resultado['mensagem']}[/green]")
@@ -783,8 +787,10 @@ def processar_pool(pool: dict) -> None:
     # existir agora nas posicoes abertas, e porque a compra aconteceu.
     comprado = False
     try:
-        comprado = dados["token_mint"] in posicoes.listar_posicoes_abertas()
-        radar.registar_analise(dados, analise_ia, comprado)
+        abertas = posicoes.listar_posicoes_abertas()
+        comprado = dados["token_mint"] in abertas
+        modo_compra = abertas.get(dados["token_mint"], {}).get("modo") if comprado else None
+        radar.registar_analise(dados, analise_ia, comprado, modo=modo_compra)
     except Exception as e:
         # O radar e so informativo: uma falha aqui nunca para o bot
         alerts.info(f"[yellow]Nao consegui registar no radar:[/yellow] {e}")

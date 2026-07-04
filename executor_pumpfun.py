@@ -297,13 +297,15 @@ def comprar_na_curva(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: f
         import posicoes
         if not carteira.registar_compra(simbolo, teto, mint=mint,
                                         preco_unitario_usd=preco_unit_usd,
-                                        quantidade_tokens=tokens):
+                                        quantidade_tokens=tokens,
+                                        dex="pump-fun", modo="bonding_curve"):
             return {"sucesso": False, "dry_run": True,
                     "mensagem": f"[SIMULADO] Saldo virtual insuficiente para {simbolo}"}
         posicoes.abrir_posicao(
             mint=mint, simbolo=simbolo, valor_investido_usd=teto,
             preco_compra_usd=preco_unit_usd, quantidade_tokens=tokens, dry_run=True,
             decimais=6,  # tokens do pump.fun sao sempre de 6 decimais
+            dex="pump-fun", modo="bonding_curve",
         )
         # Marca a posicao como sendo de bonding curve (tag no dashboard)
         posicoes.atualizar_posicao(mint, origem="bonding_curve")
@@ -384,7 +386,8 @@ def _comprar_real(mint_str, simbolo, valor_usd, valor_sol, tokens_esperados,
         import posicoes
         posicoes.abrir_posicao(mint=mint_str, simbolo=simbolo, valor_investido_usd=valor_usd,
                                preco_compra_usd=preco_unit_usd, quantidade_tokens=tokens_esperados,
-                               dry_run=False, decimais=6)  # pump.fun = 6 decimais
+                               dry_run=False, decimais=6,  # pump.fun = 6 decimais
+                               dex="pump-fun", modo="bonding_curve")
         posicoes.atualizar_posicao(mint_str, origem="bonding_curve")
         return {"sucesso": True, "dry_run": False, "origem": "bonding_curve",
                 "assinatura": assinatura,

@@ -193,13 +193,17 @@ def _executar_swap_real(cotacao: dict) -> str:
 
 
 def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float,
-                  decimais: int | None = None) -> dict:
+                  decimais: int | None = None, dex: str | None = None,
+                  modo: str = "normal") -> dict:
     """Compra 'valor_usd' dolares do token 'mint', pagando em SOL.
 
     'preco_sol_usd' e o preco atual do SOL em USD, usado so para converter
     o valor_usd em lamports de SOL a pedir na cotacao.
     'decimais' (opcional) e so para o dashboard mostrar o preco por token
     inteiro - se vier None, o dashboard cai para um lookup proprio.
+    'dex'/'modo' sao so para as estatisticas "por modo"/"por DEX" do
+    dashboard - guardados na posicao e no historico, nunca mudam a logica
+    de compra em si.
 
     Devolve um dict com o resultado (sucesso, dry_run, detalhes).
     """
@@ -221,6 +225,7 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
             simbolo, valor_usd, mint=mint,
             preco_unitario_usd=preco_compra_estimado,
             quantidade_tokens=quantidade_tokens_estimada,
+            dex=dex, modo=modo,
         ):
             return {
                 "sucesso": False, "dry_run": True,
@@ -230,7 +235,7 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
             mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
             preco_compra_usd=preco_compra_estimado,
             quantidade_tokens=quantidade_tokens_estimada, dry_run=True,
-            decimais=decimais,
+            decimais=decimais, dex=dex, modo=modo,
         )
         return {
             "sucesso": True, "dry_run": True,
@@ -255,7 +260,7 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
         mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
         preco_compra_usd=preco_compra_estimado,
         quantidade_tokens=quantidade_tokens_estimada, dry_run=False,
-        decimais=decimais,
+        decimais=decimais, dex=dex, modo=modo,
     )
     return {
         "sucesso": True, "dry_run": False, "assinatura": assinatura,
@@ -297,6 +302,7 @@ def vender_token(mint: str, percentagem: float) -> dict:
             preco_venda_usd=preco_venda_usd,
             quantidade_tokens=quantidade_a_vender,
             sniper_rapido=bool(posicao.get("sniper_rapido", False)),
+            dex=posicao.get("dex"), modo=posicao.get("modo"),
         )
         if not aplicado:
             # Rejeitado pela verificacao de sanidade (cotacao absurda) -

@@ -108,11 +108,12 @@ def valor_atual_usd(mint: str, quantidade_tokens: float) -> float | None:
         return None
 
 
-def comprar_token(mint: str, simbolo: str, valor_usd: float) -> dict:
+def comprar_token(mint: str, simbolo: str, valor_usd: float, dex: str | None = None) -> dict:
     """Compra 'valor_usd' do token (contrato 0x...) pagando em BNB.
 
     Aplica o limite BSC_MAX_TRADE_USD. Em dry-run so simula (com cotacao
     real da PancakeSwap). Em real, constroi + estima gas + [talvez] envia.
+    'dex' e so para as estatisticas "por DEX" do dashboard (ex: "pancakeswap").
     """
     teto = min(valor_usd, config.BSC_MAX_TRADE_USD)
     if teto <= 0:
@@ -145,23 +146,24 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float) -> dict:
         if not carteira.registar_compra(simbolo, teto, mint=mint,
                                         preco_unitario_usd=preco_unit_usd,
                                         quantidade_tokens=tokens_estimados,
-                                        chain="bsc"):
+                                        chain="bsc", dex=dex, modo="normal"):
             return {"sucesso": False, "dry_run": True,
                     "mensagem": f"[SIMULADO][BSC] Saldo virtual insuficiente para {simbolo}"}
         posicoes.abrir_posicao(mint=mint, simbolo=simbolo, valor_investido_usd=teto,
                                preco_compra_usd=preco_unit_usd,
                                quantidade_tokens=tokens_estimados, dry_run=True,
-                               decimais=18)  # tokens BSC/ERC-20 sao tipicamente 18 decimais
+                               decimais=18,  # tokens BSC/ERC-20 sao tipicamente 18 decimais
+                               dex=dex, modo="normal")
         posicoes.atualizar_posicao(mint, chain="bsc")
         return {"sucesso": True, "dry_run": True, "chain": "bsc",
                 "quantidade_tokens": tokens_estimados,
                 "mensagem": f"[SIMULADO][BSC] Comprado ${teto:.2f} de {simbolo} via PancakeSwap"}
 
     # ---------------- REAL ----------------
-    return _comprar_real(mint, simbolo, teto, amount_in_wei, tokens_estimados, preco_unit_usd)
+    return _comprar_real(mint, simbolo, teto, amount_in_wei, tokens_estimados, preco_unit_usd, dex)
 
 
-def _comprar_real(mint, simbolo, valor_usd, amount_in_wei, tokens_estimados, preco_unit_usd) -> dict:
+def _comprar_real(mint, simbolo, valor_usd, amount_in_wei, tokens_estimados, preco_unit_usd, dex=None) -> dict:
     """Constroi swapExactETHForTokens, estima o gas e - se a trava
     permitir - assina e envia. Documentado como NAO validado com um swap
     real em mainnet."""
@@ -217,7 +219,8 @@ def _comprar_real(mint, simbolo, valor_usd, amount_in_wei, tokens_estimados, pre
         posicoes.abrir_posicao(mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
                                preco_compra_usd=preco_unit_usd,
                                quantidade_tokens=tokens_estimados, dry_run=False,
-                               decimais=18)  # BSC/ERC-20 = 18 decimais
+                               decimais=18,  # BSC/ERC-20 = 18 decimais
+                               dex=dex, modo="normal")
         posicoes.atualizar_posicao(mint, chain="bsc")
         return {"sucesso": True, "dry_run": False, "chain": "bsc", "assinatura": tx_hash,
                 "mensagem": f"[BSC] Comprado ${valor_usd:.2f} de {simbolo} - tx {tx_hash[:12]}..."}
@@ -268,6 +271,7 @@ def vender_token(mint: str, percentagem: float) -> dict:
             pos["simbolo"], valor_recebido_usd, investido_proporcional, mint=mint,
             preco_compra_usd=pos.get("preco_compra_usd"), preco_venda_usd=preco_venda_usd,
             quantidade_tokens=quantidade_a_vender, chain="bsc",
+            dex=pos.get("dex"), modo=pos.get("modo"),
         )
         if not aplicado:
             # Rejeitado pela verificacao de sanidade - posicao mantida aberta

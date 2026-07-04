@@ -193,6 +193,33 @@ function passaFiltroChain(item) {
   return (item.chain || "solana") === filtroChain;
 }
 
+// Filtro de MODO ativo ("todos" | "normal" | "bonding_curve" |
+// "sniper_rapido" | "copy_trading"). Aplica-se a Posicoes, Radar e
+// Historico - a Watchlist fica de fora de proposito: sao tokens ainda
+// nao comprados, por isso nao pertencem a nenhum modo especifico ainda.
+let filtroModo = "todos";
+
+/** True se um registo (com campo .modo, so definido depois de comprado)
+    deve aparecer com o filtro de modo atual. */
+function passaFiltroModo(item) {
+  if (filtroModo === "todos") return true;
+  return item.modo === filtroModo;
+}
+
+const _ROTULOS_MODO = {
+  normal: "Normal", bonding_curve: "Bonding Curve",
+  sniper_rapido: "💀 Sniper Rápido", copy_trading: "👥 Copy Trading",
+};
+/** Nome legivel de um modo (para as tabelas de estatisticas) */
+function rotuloModo(modo) {
+  return _ROTULOS_MODO[modo] || modo || "Normal";
+}
+
+el("filtro-modo").addEventListener("change", (evento) => {
+  filtroModo = evento.target.value;
+  atualizarTudo();
+});
+
 /** Etiqueta pequena da rede, ao lado do simbolo nas tabelas */
 function tagChain(chain) {
   const c = chain || "solana";
@@ -931,7 +958,7 @@ async function atualizarResumo() {
 
   // --- Tabela de historico (mais recente primeiro, ja vem ordenada) ---
   // Aplica o filtro de chain + os filtros proprios do historico
-  const histVisivel = dados.historico.filter(passaFiltroChain).filter(passaFiltroHist);
+  const histVisivel = dados.historico.filter(passaFiltroChain).filter(passaFiltroHist).filter(passaFiltroModo);
   el("vazio-historico").hidden = histVisivel.length > 0;
   el("tabela-historico").innerHTML = histVisivel.map((h) => {
     const eVenda = h.tipo === "venda";
@@ -957,6 +984,32 @@ async function atualizarResumo() {
       <td><button class="btn-remover" data-remover-hist="${h.timestamp}" title="Remover do histórico">✕</button></td>
     </tr>`;
   }).join("");
+}
+
+/** Desenha uma das duas tabelas de desempenho (por modo ou por DEX).
+    'grupos' vem de /api/estatisticas (lista de {chave,n_compras,n_vendas,
+    win_rate,lucro_total}); 'formatarChave' transforma a chave em texto
+    legivel (rotuloModo para modo; identidade para dex). */
+function _desenharDesempenho(idTabela, idVazio, grupos, formatarChave) {
+  el(idVazio).hidden = grupos.length > 0;
+  el(idTabela).innerHTML = grupos.map((g) => {
+    const classeLucro = g.lucro_total > 0 ? "positivo" : g.lucro_total < 0 ? "negativo" : "";
+    return `<tr>
+      <td>${escHtml(formatarChave(g.chave))}</td>
+      <td>${g.n_compras}</td>
+      <td>${g.n_vendas}</td>
+      <td>${g.win_rate === null ? "–" : g.win_rate.toFixed(1) + "%"}</td>
+      <td class="${classeLucro}">${dinheiroComSinal(g.lucro_total)}</td>
+    </tr>`;
+  }).join("");
+}
+
+/** Atualiza as duas seccoes de desempenho (por modo e por DEX/plataforma).
+    So reflete a carteira SIMULADA - ver nota no dashboard.py. */
+async function atualizarEstatisticas() {
+  const dados = await (await fetch("/api/estatisticas")).json();
+  _desenharDesempenho("tabela-desempenho-modo", "vazio-desempenho-modo", dados.por_modo, rotuloModo);
+  _desenharDesempenho("tabela-desempenho-dex", "vazio-desempenho-dex", dados.por_dex, (dex) => dex);
 }
 
 /** Atualiza a tabela de posicoes abertas (com preco atual da Jupiter) */
@@ -1020,7 +1073,7 @@ async function atualizarPosicoes() {
   const dados = await resposta.json();
   const posicoes = dados.posicoes;
 
-  const posVisiveis = _ordenarPosicoes(posicoes.filter(passaFiltroChain));
+  const posVisiveis = _ordenarPosicoes(posicoes.filter(passaFiltroChain).filter(passaFiltroModo));
   el("vazio-posicoes").hidden = posVisiveis.length > 0;
   _atualizarSetasOrdenacao();
   el("tabela-posicoes").innerHTML = posVisiveis.map((p) => {
@@ -1120,7 +1173,7 @@ async function atualizarRadar() {
   const dados = await resposta.json();
   const radar = dados.radar;
 
-  const visiveis = radar.filter(passaFiltroChain);
+  const visiveis = radar.filter(passaFiltroChain).filter(passaFiltroModo);
   el("vazio-radar").hidden = visiveis.length > 0;
   el("tabela-radar").innerHTML = visiveis.map((r) => {
     // Cor do score: verde = seguro, amarelo = medio, vermelho = arriscado
@@ -1256,6 +1309,7 @@ async function atualizarTudo() {
       atualizarCurva(),
       atualizarSniper(),
       atualizarCopy(),
+      atualizarEstatisticas(),
     ]);
     el("ultima-atualizacao").textContent =
       "Atualizado às " + new Date().toLocaleTimeString("pt-PT");

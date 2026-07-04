@@ -147,6 +147,16 @@
         <button class="chip-chain" data-chain="solana">Solana</button>
         <button class="chip-chain" data-chain="bsc">BSC</button>
       </div>
+      <!-- Filtro por MODO de compra: aplica-se as Posicoes, Radar e
+           Historico. A Watchlist fica de fora de proposito - sao tokens
+           AINDA nao comprados, por isso nao pertencem a nenhum modo. -->
+      <select id="filtro-modo" class="campo-filtro" title="Filtrar por modo de compra">
+        <option value="todos">Todos os modos</option>
+        <option value="normal">Normal</option>
+        <option value="bonding_curve">Bonding Curve</option>
+        <option value="sniper_rapido">💀 Sniper Rápido</option>
+        <option value="copy_trading">👥 Copy Trading</option>
+      </select>
       <!-- Resetar: so faz algo em modo SIMULADO, o backend recusa em REAL -->
       <button class="btn-link-perigo" id="btn-abrir-resetar" title="Limpar dados de teste (só modo simulado)">Resetar bot</button>
     </div>
@@ -256,6 +266,53 @@
       <div class="vazio" id="vazio-velas" hidden>
         <svg class="icone-vazio" viewBox="0 0 24 24"><use href="#i-velas"/></svg>
         <p>Ainda sem vendas fechadas — aparecem aqui quando o stop-loss ou take-profit disparar.<br>Cada venda vira uma vela: verde se deu lucro, vermelha se deu prejuízo.</p>
+      </div>
+    </section>
+
+    <!-- ================= DESEMPENHO POR MODO E POR PLATAFORMA ================= -->
+    <!-- So reflete a carteira SIMULADA (carteira.json) - tal como o resto
+         dos cartoes/graficos acima. Em modo REAL o carteira.json nao e
+         tocado (ver nota em executor_bsc.py), por isso estas estatisticas
+         mostram sempre a atividade em DRY_RUN. -->
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-lista"/></svg> Desempenho por modo</h2>
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Modo</th>
+              <th>Compras</th>
+              <th>Vendas</th>
+              <th>Win rate</th>
+              <th>Lucro/prejuízo</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-desempenho-modo"></tbody>
+        </table>
+      </div>
+      <div class="vazio" id="vazio-desempenho-modo" hidden>
+        <p>Ainda sem operações registadas (só conta o modo simulado).</p>
+      </div>
+    </section>
+
+    <section class="painel">
+      <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-lista"/></svg> Desempenho por plataforma/DEX</h2>
+      <div class="tabela-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Plataforma</th>
+              <th>Compras</th>
+              <th>Vendas</th>
+              <th>Win rate</th>
+              <th>Lucro/prejuízo</th>
+            </tr>
+          </thead>
+          <tbody id="tabela-desempenho-dex"></tbody>
+        </table>
+      </div>
+      <div class="vazio" id="vazio-desempenho-dex" hidden>
+        <p>Ainda sem operações registadas.</p>
       </div>
     </section>
 
