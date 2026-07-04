@@ -110,6 +110,27 @@ h1 {
 h1 .logo { color: var(--accent); }
 h1 .subtitulo { color: var(--accent); font-weight: 600; font-size: 0.7rem; letter-spacing: 1.5px; }
 
+/* Saldo em tempo real no cabecalho fixo - sempre visivel, mesmo com
+   scroll. Usa o mesmo efeito .flash dos cartoes de resumo mais abaixo. */
+.saldo-topo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+}
+.saldo-topo-label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--texto-mudo);
+}
+.saldo-topo-valor {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--texto);
+  padding: 1px 6px;
+}
+
 /* Icones SVG inline: herdam a cor do texto via currentColor */
 .icone {
   width: 18px; height: 18px;

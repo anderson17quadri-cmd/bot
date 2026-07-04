@@ -925,6 +925,9 @@ async function atualizarResumo() {
   definirValor("c-saldo-livre", dinheiro(c.saldo_livre));
   definirValor("c-valor-posicoes", dinheiro(c.valor_posicoes));
   definirValor("c-valor-total", dinheiro(c.valor_total));
+  // Mesmo valor, mas sempre visivel no cabecalho fixo (nao so nos
+  // cartoes mais abaixo, que podem estar fora do ecra com scroll)
+  definirValor("saldo-topo-valor", dinheiro(c.valor_total));
   definirValor("c-n-compras", String(c.n_compras));
   definirValor("c-n-vendas", String(c.n_vendas));
   definirValor("c-win-rate", c.win_rate === null ? "–" : c.win_rate + "%");

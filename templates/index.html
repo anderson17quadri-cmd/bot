@@ -58,6 +58,14 @@
         Sniper Bot <span class="subtitulo" id="badge-chain">SOLANA</span>
       </h1>
 
+      <!-- Saldo em tempo real, sempre visivel no cabecalho (nao so nos
+           cartoes mais abaixo). Atualiza no mesmo polling do resto da
+           pagina, com o mesmo efeito de flash dos cartoes. -->
+      <div class="saldo-topo" id="saldo-topo" title="Valor total (saldo livre + posições abertas)">
+        <span class="saldo-topo-label">Valor Total</span>
+        <span class="saldo-topo-valor num" id="saldo-topo-valor">–</span>
+      </div>
+
       <!-- Toggle SIMULADO/REAL: controlo segmentado que mostra o modo
            ATUAL do .env e permite mudar (com dupla confirmacao p/ REAL) -->
       <div class="seletor-modo" id="seletor-modo" role="group" aria-label="Modo do bot">
