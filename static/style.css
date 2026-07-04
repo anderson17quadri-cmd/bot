@@ -465,6 +465,11 @@ td {
 tbody tr:hover td { background: rgba(139, 124, 246, 0.05); } /* hover suave */
 tr:last-child td { border-bottom: none; }
 
+/* Cabecalhos clicaveis para ordenar a tabela (ex: Posicoes abertas) */
+.th-sortavel { cursor: pointer; user-select: none; }
+.th-sortavel:hover { color: var(--texto); }
+.th-sortavel .seta-ordenacao { margin-left: 4px; opacity: 0.6; }
+
 /* Etiquetas pequenas (compra/venda no historico, COMPRADO no radar) */
 .tag {
   font-family: var(--fonte-texto);

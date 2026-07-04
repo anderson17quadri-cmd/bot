@@ -264,15 +264,15 @@
       <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-alvo"/></svg> Posições abertas <span class="ao-vivo">● ao vivo</span></h2>
       <div class="tabela-scroll">
         <table>
-          <thead>
+          <thead id="tabela-posicoes-cabecalho">
             <tr>
               <th>Símbolo</th>
-              <th>Investido</th>
+              <th class="th-sortavel" data-sort="valor_investido_usd">Investido</th>
               <th>Preço compra</th>
-              <th>Quantidade</th>
-              <th>Aberta há</th>
-              <th>Valor atual</th>
-              <th>P/L</th>
+              <th class="th-sortavel" data-sort="quantidade_tokens">Quantidade</th>
+              <th class="th-sortavel" data-sort="timestamp_compra">Aberta há</th>
+              <th class="th-sortavel" data-sort="valor_atual_usd">Valor atual</th>
+              <th class="th-sortavel" data-sort="lucro_nao_realizado_usd">P/L</th>
               <th>Vender</th>
             </tr>
           </thead>

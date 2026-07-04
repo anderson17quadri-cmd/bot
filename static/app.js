@@ -966,13 +966,63 @@ async function atualizarResumo() {
 // polling, por isso precisamos de comparar com este estado a parte.
 const _ultimoValorPosicao = {};
 
+// Estado da ordenacao da tabela de posicoes (clicavel nos cabecalhos).
+// Default: P/L nao realizado, do maior lucro para o maior prejuizo -
+// as posicoes a dar lucro aparecem no topo, as que estao a perder ficam
+// mais abaixo (pedido do utilizador).
+const _ordenacaoPosicoes = { campo: "lucro_nao_realizado_usd", direcao: -1 };
+
+/** Ordena a lista de posicoes pelo campo/direcao atuais. Valores null
+    (ex: cotacao Jupiter falhou) vao sempre para o fim, em qualquer direcao -
+    "sem dados" nao e nem o maior nem o menor valor, so falta de informacao. */
+function _ordenarPosicoes(lista) {
+  const { campo, direcao } = _ordenacaoPosicoes;
+  return [...lista].sort((a, b) => {
+    let va = a[campo], vb = b[campo];
+    if (campo === "timestamp_compra") { va = va ? new Date(va).getTime() : null; vb = vb ? new Date(vb).getTime() : null; }
+    if (va === null || va === undefined) return 1;
+    if (vb === null || vb === undefined) return -1;
+    if (va < vb) return -1 * direcao;
+    if (va > vb) return 1 * direcao;
+    return 0;
+  });
+}
+
+/** Atualiza as setas (▲/▼) nos cabecalhos clicaveis conforme a ordenacao atual */
+function _atualizarSetasOrdenacao() {
+  document.querySelectorAll("#tabela-posicoes-cabecalho .th-sortavel").forEach((th) => {
+    const seta = th.querySelector(".seta-ordenacao");
+    if (seta) seta.remove();
+    if (th.dataset.sort === _ordenacaoPosicoes.campo) {
+      th.insertAdjacentHTML("beforeend",
+        `<span class="seta-ordenacao">${_ordenacaoPosicoes.direcao === -1 ? "▼" : "▲"}</span>`);
+    }
+  });
+}
+
+// Clique num cabecalho ordenavel: muda o campo (default desc) ou inverte
+// a direcao se ja for o campo atual em uso.
+document.querySelectorAll("#tabela-posicoes-cabecalho .th-sortavel").forEach((th) => {
+  th.addEventListener("click", () => {
+    const campo = th.dataset.sort;
+    if (_ordenacaoPosicoes.campo === campo) {
+      _ordenacaoPosicoes.direcao *= -1;
+    } else {
+      _ordenacaoPosicoes.campo = campo;
+      _ordenacaoPosicoes.direcao = -1;  // novo campo: comeca do maior para o menor
+    }
+    atualizarPosicoes();
+  });
+});
+
 async function atualizarPosicoes() {
   const resposta = await fetch("/api/posicoes");
   const dados = await resposta.json();
   const posicoes = dados.posicoes;
 
-  const posVisiveis = posicoes.filter(passaFiltroChain);
+  const posVisiveis = _ordenarPosicoes(posicoes.filter(passaFiltroChain));
   el("vazio-posicoes").hidden = posVisiveis.length > 0;
+  _atualizarSetasOrdenacao();
   el("tabela-posicoes").innerHTML = posVisiveis.map((p) => {
     // P/L nao realizado: pode ser null se a cotacao Jupiter falhou
     let celulaPL = "<td>N/A</td>";
