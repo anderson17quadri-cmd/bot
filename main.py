@@ -77,10 +77,33 @@ def avaliar_com_ia(dados: dict) -> dict:
     return resultado
 
 
-def obter_preco_sol_usd() -> float:
-    """Preco atual do SOL em USD, via cotacao Jupiter (SOL -> USDC)."""
+# Cache do preco do SOL: o preco quase nao mexe em poucos segundos, mas
+# obter_preco_sol_usd() e chamado em cada compra (caminho critico). Sem
+# cache, compras seguidas pagavam cada uma uma ida a Jupiter (~100-300ms).
+# Guardamos o ultimo valor por PRECO_SOL_CACHE_SEGUNDOS para tirar essa
+# latencia do caminho de execucao sem arriscar um preco desatualizado.
+_preco_sol_cache: dict = {"valor": 0.0, "quando": 0.0}
+
+
+def obter_preco_sol_usd(forcar: bool = False) -> float:
+    """Preco atual do SOL em USD, via cotacao Jupiter (SOL -> USDC).
+
+    Usa uma cache curta (config.PRECO_SOL_CACHE_SEGUNDOS). Passa
+    forcar=True para ignorar a cache e ir buscar fresco (ex: antes de
+    fechar uma posicao, onde queremos o preco mais atual possivel)."""
+    agora = time.time()
+    if (
+        not forcar
+        and _preco_sol_cache["valor"] > 0
+        and (agora - _preco_sol_cache["quando"]) < config.PRECO_SOL_CACHE_SEGUNDOS
+    ):
+        return _preco_sol_cache["valor"]
     cot = executor._obter_cotacao(config.MINT_SOL, config.MINT_USDC, 1_000_000_000)
-    return float(cot["outAmount"]) / 1_000_000  # USDC tem 6 casas decimais
+    preco = float(cot["outAmount"]) / 1_000_000  # USDC tem 6 casas decimais
+    if preco > 0:
+        _preco_sol_cache["valor"] = preco
+        _preco_sol_cache["quando"] = agora
+    return preco
 
 
 def _e_pumpfun_curva(dados: dict) -> bool:
@@ -663,6 +686,13 @@ def main() -> None:
             except Exception as e:
                 alerts.info(f"[red]Erro a detetar pools ({det.rede}):[/red] {e}")
 
+        # Nº de posicoes abertas ANTES de processar: se crescer, e porque
+        # uma compra abriu posicao neste ciclo -> verificamos ja a seguir
+        # (verificacao reativa), sem esperar o intervalo normal, para o
+        # stop-loss de um token que despenca logo apos a compra disparar
+        # depressa. Vale para TODOS os modos de compra (normal/curva/caveira).
+        posicoes_antes = len(posicoes.listar_posicoes_abertas()) if config.fase2_configurada() else 0
+
         if not novos:
             alerts.info(f"[dim]ciclo {ciclo}: sem tokens novos. A aguardar {config.POLL_INTERVAL_SEGUNDOS}s...[/dim]")
         else:
@@ -680,18 +710,25 @@ def main() -> None:
         # tokens novos), para o stop-loss/take-profit disparar a tempo.
         # A watchlist e reavaliada na mesma cadencia (preco + liquidez viva).
         agora = time.time()
-        if config.fase2_configurada() and (
-            agora - ultima_verificacao_posicoes >= config.INTERVALO_VERIFICAR_POSICOES
-        ):
+        abriu_posicao = (
+            config.fase2_configurada()
+            and len(posicoes.listar_posicoes_abertas()) > posicoes_antes
+        )
+        no_intervalo = agora - ultima_verificacao_posicoes >= config.INTERVALO_VERIFICAR_POSICOES
+        if config.fase2_configurada() and (abriu_posicao or no_intervalo):
             try:
                 verificar_posicoes()
             except Exception as e:
                 alerts.info(f"[red]Erro a verificar posicoes:[/red] {e}")
-            try:
-                reavaliar_watchlist()
-            except Exception as e:
-                alerts.info(f"[red]Erro a reavaliar a watchlist:[/red] {e}")
-            ultima_verificacao_posicoes = agora
+            # A watchlist faz chamadas por token (com pausas) - so a
+            # reavaliamos na cadencia normal, nunca no gatilho reativo, para
+            # nao martelar as APIs sempre que uma compra abre posicao.
+            if no_intervalo:
+                try:
+                    reavaliar_watchlist()
+                except Exception as e:
+                    alerts.info(f"[red]Erro a reavaliar a watchlist:[/red] {e}")
+                ultima_verificacao_posicoes = agora
 
         # Cadencia do ciclo: com WebSocket ativo drenamos a fila depressa
         # (2s), senao anulava-se a vantagem de velocidade - o token chega

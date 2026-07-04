@@ -102,6 +102,12 @@ SOLANA_WS_URL = _env_texto("SOLANA_WS_URL", "")
 # nunca ultrapassar o plano gratuito do Helius. Pedidos por segundo max.
 RPC_MAX_PEDIDOS_POR_SEGUNDO = _env_float("RPC_MAX_PEDIDOS_POR_SEGUNDO", 8.0)
 
+# --- Otimizacoes de execucao -------------------------------------------
+# Cache do preco do SOL (segundos). O preco quase nao mexe em poucos
+# segundos, mas obter_preco_sol_usd() e chamado em cada compra (caminho
+# critico). Cache curta tira essa latencia sem arriscar preco velho.
+PRECO_SOL_CACHE_SEGUNDOS = _env_float("PRECO_SOL_CACHE_SEGUNDOS", 8.0)
+
 # --- Multi-chain (Parte B) ---------------------------------------------
 # REDE fica como a rede "principal"/legada (Solana) para o codigo antigo
 # que ainda a referencia. REDES_ATIVAS e a lista de redes a monitorizar
