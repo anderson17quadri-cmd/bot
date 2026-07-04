@@ -45,20 +45,54 @@ def _obter_cotacao(mint_entrada: str, mint_saida: str, quantidade_lamports: int)
     return resposta.json()
 
 
+def _enviar_via_jito(tx_assinada_base64: str) -> str:
+    """Envia a transacao ja assinada ao block-engine da Jito (endpoint
+    publico, sem conta/chave). A transacao ja tem a gorjeta (tip) dentro,
+    injetada pela Jupiter no /swap. Devolve a assinatura.
+
+    A Jito expoe um sendTransaction compativel com o JSON-RPC do Solana
+    em /api/v1/transactions - a mesma forma de chamada do RPC normal."""
+    url = config.JITO_BLOCK_ENGINE_URL.rstrip("/") + "/api/v1/transactions"
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "sendTransaction",
+        "params": [tx_assinada_base64, {"encoding": "base64"}],
+    }
+    resposta = requests.post(url, json=payload, timeout=30)
+    resposta.raise_for_status()
+    resultado = resposta.json()
+    if "error" in resultado:
+        raise RuntimeError(f"Jito recusou a transacao: {resultado['error']}")
+    return resultado["result"]
+
+
 def _executar_swap_real(cotacao: dict) -> str:
     """Pede a transacao a Jupiter, assina-a com a wallet do bot, envia-a
     para a rede, e devolve a assinatura (hash) da transacao.
 
     So deve ser chamada quando config.DRY_RUN == False.
-    """
+
+    Se config.JITO_ATIVO, pede a Jupiter para injetar uma gorjeta Jito na
+    transacao e envia-a ao block-engine da Jito (mais rapido a entrar na
+    congestao). Senao, mantem o envio normal pelo RPC. O DRY_RUN nunca
+    chega aqui, por isso o modo simulado fica 100% igual."""
     keypair = wallet.obter_keypair()
+
+    usar_jito = config.JITO_ATIVO
+    if usar_jito:
+        # A Jupiter mete a instrucao do tip DENTRO da propria transacao do
+        # swap (nao e preciso montar um bundle a mao). Passamos o tip aqui.
+        prioridade = {"jitoTipLamports": config.JITO_TIP_LAMPORTS}
+    else:
+        prioridade = "auto"
 
     payload = {
         "quoteResponse": cotacao,
         "userPublicKey": str(keypair.pubkey()),
         "wrapAndUnwrapSol": True,
         "dynamicComputeUnitLimit": True,
-        "prioritizationFeeLamports": "auto",
+        "prioritizationFeeLamports": prioridade,
     }
     resposta = requests.post(JUPITER_SWAP_URL, json=payload, timeout=20)
     resposta.raise_for_status()
@@ -70,6 +104,9 @@ def _executar_swap_real(cotacao: dict) -> str:
 
     tx_assinada_bytes = bytes(tx_assinada)
     tx_assinada_base64 = base64.b64encode(tx_assinada_bytes).decode("utf-8")
+
+    if usar_jito:
+        return _enviar_via_jito(tx_assinada_base64)
 
     payload_envio = {
         "jsonrpc": "2.0",

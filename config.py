@@ -108,6 +108,23 @@ RPC_MAX_PEDIDOS_POR_SEGUNDO = _env_float("RPC_MAX_PEDIDOS_POR_SEGUNDO", 8.0)
 # critico). Cache curta tira essa latencia sem arriscar preco velho.
 PRECO_SOL_CACHE_SEGUNDOS = _env_float("PRECO_SOL_CACHE_SEGUNDOS", 8.0)
 
+# --- Jito (envio prioritario de transacoes) ----------------------------
+# Em vez de mandar a transacao pelo RPC normal, manda-a ao block-engine
+# da Jito com uma "gorjeta" (tip). Os validadores da Jito priorizam quem
+# paga tip -> a transacao entra mais depressa nos momentos de congestao.
+# So corre em modo REAL (DRY_RUN=False); no simulado e completamente
+# ignorado. DESLIGADO por defeito - liga so quando quiseres pagar o tip.
+JITO_ATIVO = _env_texto("JITO_ATIVO", "false").lower() in ("1", "true", "yes", "sim")
+# Endpoint publico do block-engine (sem conta/chave). Ha varias regioes;
+# esta e a global. Podes trocar por ex. amsterdam/frankfurt/ny/tokyo.
+JITO_BLOCK_ENGINE_URL = _env_texto(
+    "JITO_BLOCK_ENGINE_URL", "https://mainnet.block-engine.jito.wtf"
+)
+# Valor do tip em lamports (1 SOL = 1e9). O minimo aceite pela Jito e
+# 1000 lamports; um valor demasiado baixo raramente e includo. 100000
+# lamports (~0.0001 SOL) e um ponto de partida razoavel.
+JITO_TIP_LAMPORTS = _env_int("JITO_TIP_LAMPORTS", 100_000)
+
 # --- Multi-chain (Parte B) ---------------------------------------------
 # REDE fica como a rede "principal"/legada (Solana) para o codigo antigo
 # que ainda a referencia. REDES_ATIVAS e a lista de redes a monitorizar
@@ -330,6 +347,7 @@ def resumo() -> str:
         f"Camada 1 DeepSeek : {'ON (' + DEEPSEEK_MODEL + ')' if camada1_configurada() else 'OFF (sem chave -> usa score heuristico)'}",
         f"Camada 2 Claude   : {'ON (' + ANTHROPIC_MODEL + ')' if camada2_configurada() else 'OFF (opcional)'}",
         f"Fase 2 (trading)  : {'ON, DRY_RUN=' + str(DRY_RUN) if fase2_configurada() else 'OFF (sem WALLET_PRIVATE_KEY)'}",
+        f"Envio Jito        : {'ON (tip ' + str(JITO_TIP_LAMPORTS) + ' lamports)' if JITO_ATIVO else 'OFF (envio normal pelo RPC)'}",
     ]
     return "\n".join(linhas)
 
