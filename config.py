@@ -380,8 +380,12 @@ SNIPER_RAPIDO_ATIVO = _env_texto("SNIPER_RAPIDO_ATIVO", "false").lower() in ("1"
 SNIPER_RAPIDO_VALOR_USD = _env_float("SNIPER_RAPIDO_VALOR_USD", 1.0)       # compra minuscula, so este modo
 SNIPER_RAPIDO_LIMITE_DIARIO_USD = _env_float("SNIPER_RAPIDO_LIMITE_DIARIO_USD", 10.0)
 # Se a DeepSeek (depois de a posicao ja estar comprada) devolver um score
-# acima disto, vende-se imediatamente - protecao a posteriori
-SNIPER_RAPIDO_SCORE_VENDA_URGENTE = _env_int("SNIPER_RAPIDO_SCORE_VENDA_URGENTE", 70)
+# acima disto, vende-se imediatamente - protecao a posteriori. Descido de
+# 70 para 50 apos o diagnostico: com um win rate real de 17.6%, a 2a
+# camada de protecao so disparava em casos EXTREMOS (score>70) - baixar o
+# limiar corta perdas mais cedo em posicoes so "mediocres", nao so nas
+# obviamente pessimas.
+SNIPER_RAPIDO_SCORE_VENDA_URGENTE = _env_int("SNIPER_RAPIDO_SCORE_VENDA_URGENTE", 50)
 
 # --- Checklist BINARIO do modo caveira (substitui o score heuristico) ---
 # Este modo deixou de somar pesos (score). Agora e uma checklist sim/nao,
@@ -390,9 +394,14 @@ SNIPER_RAPIDO_SCORE_VENDA_URGENTE = _env_int("SNIPER_RAPIDO_SCORE_VENDA_URGENTE"
 # revogada, (3) liquidez >= LIQUIDEZ_MINIMA_CAVEIRA_USD, (4) idade do
 # token <= IDADE_MAXIMA_CAVEIRA_SEGUNDOS. Qualquer uma que falhe -> nao
 # compra neste modo (mas o modo normal, em paralelo, avalia na mesma).
-# A liquidez minima do caveira pode ser MAIS BAIXA que a do modo normal
-# (aceita-se mais risco em troca de entrar cedo).
-LIQUIDEZ_MINIMA_CAVEIRA_USD = _env_float("LIQUIDEZ_MINIMA_CAVEIRA_USD", 1000.0)
+# A liquidez minima do caveira podia ser MAIS BAIXA que a do modo normal
+# (aceita-se mais risco em troca de entrar cedo) - mas os resultados reais
+# (win rate 17.6%, -13.71% no total) mostraram que $1000 era liquidez
+# DEMASIADO fina: pouca margem antes do preco reagir com qualquer venda,
+# e mais facil de ser um pool praticamente vazio disfarcado. Subido para
+# igualar o minimo do modo normal - a vantagem do Caveira e nao esperar
+# pela IA, nao precisa de vir tambem de aceitar liquidez mais fraca.
+LIQUIDEZ_MINIMA_CAVEIRA_USD = _env_float("LIQUIDEZ_MINIMA_CAVEIRA_USD", 2000.0)
 IDADE_MAXIMA_CAVEIRA_SEGUNDOS = _env_int("IDADE_MAXIMA_CAVEIRA_SEGUNDOS", 60)
 
 # --- Filtro de QUALIDADE do Caveira (momentum.py) ----------------------
@@ -407,20 +416,35 @@ IDADE_MAXIMA_CAVEIRA_SEGUNDOS = _env_int("IDADE_MAXIMA_CAVEIRA_SEGUNDOS", 60)
 # RPC extra - o Caveira fica mais LENTO mas mais SELETIVO. Cada sinal
 # desliga-se individualmente pondo o valor a 0 (ou 100 no caso do
 # top-holder) se preferires velocidade pura (comportamento antigo).
-CAVEIRA_JANELA_MOMENTUM_SEGUNDOS = _env_float("CAVEIRA_JANELA_MOMENTUM_SEGUNDOS", 5.0)
-# Minimo de compras por cada venda (ex: 2.0 = pelo menos o dobro de
+#
+# DIAGNOSTICO (apos os primeiros resultados reais: 68 compras, 51 vendas,
+# win rate 17.6%, -$27.41/-13.71%): os limiares abaixo eram permissivos
+# demais para o problema real, que NAO e "scams tecnicos" mas sim
+# CONTAMINACAO POR OUTROS BOTS DE SNIPE. Nos primeiros segundos de um
+# token novo no pump.fun, quem mais compra sao OUTROS bots de sniper (ha
+# dezenas a disparar em cada lancamento), nao interesse organico humano.
+# "3 compradores distintos" ou "5 transacoes" e um limiar que qualquer
+# token, bom ou mau, atinge trivialmente so com esses bots - dava falsa
+# confianca sem filtrar nada de facto. Alem disso, o fail-open (ver
+# main.py) fazia o filtro nao bloquear quase nada num RPC publico,
+# custando so o atraso sem ganhar seletividade real. Os valores abaixo
+# foram apertados para exigir MUITO mais atividade antes de confiar nela,
+# e o main.py passou a FAIL-CLOSED (rejeita se nao conseguir confirmar).
+CAVEIRA_JANELA_MOMENTUM_SEGUNDOS = _env_float("CAVEIRA_JANELA_MOMENTUM_SEGUNDOS", 8.0)
+# Minimo de compras por cada venda (ex: 3.0 = pelo menos o triplo de
 # compras que vendas). 0 desliga este filtro.
-CAVEIRA_RATIO_COMPRA_VENDA_MIN = _env_float("CAVEIRA_RATIO_COMPRA_VENDA_MIN", 2.0)
-# Minimo de enderecos DISTINTOS a comprar (evita 1-2 wallets a inflacionar
-# artificialmente o volume). 0 desliga este filtro.
-CAVEIRA_COMPRADORES_UNICOS_MIN = _env_int("CAVEIRA_COMPRADORES_UNICOS_MIN", 3)
+CAVEIRA_RATIO_COMPRA_VENDA_MIN = _env_float("CAVEIRA_RATIO_COMPRA_VENDA_MIN", 3.0)
+# Minimo de enderecos DISTINTOS a comprar (evita 1-2 wallets, ou so um
+# punhado de bots de sniper, a inflacionar artificialmente o volume).
+# 0 desliga este filtro.
+CAVEIRA_COMPRADORES_UNICOS_MIN = _env_int("CAVEIRA_COMPRADORES_UNICOS_MIN", 6)
 # Se o maior holder detiver mais do que isto (%), rejeita mesmo que passe
 # tudo o resto. Reutiliza o dado que o analyzer.py ja calculou (sem
 # chamadas RPC extra). <= 0 desliga este filtro.
-CAVEIRA_TOP_HOLDER_MAX_PCT = _env_float("CAVEIRA_TOP_HOLDER_MAX_PCT", 35.0)
+CAVEIRA_TOP_HOLDER_MAX_PCT = _env_float("CAVEIRA_TOP_HOLDER_MAX_PCT", 30.0)
 # Minimo de transacoes ja feitas desde a criacao (evita comprar no
 # proprio bloco de criacao, antes de qualquer interesse real). 0 desliga.
-CAVEIRA_TRANSACOES_MIN = _env_int("CAVEIRA_TRANSACOES_MIN", 5)
+CAVEIRA_TRANSACOES_MIN = _env_int("CAVEIRA_TRANSACOES_MIN", 12)
 
 
 def fase2_configurada() -> bool:

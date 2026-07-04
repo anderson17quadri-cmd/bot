@@ -248,8 +248,16 @@ def _ler_fee_recipient() -> Pubkey:
 # ==========================================================================
 # Compra na curva (dry-run simula; real constroi + simula + [talvez] envia)
 # ==========================================================================
-def comprar_na_curva(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float) -> dict:
+def comprar_na_curva(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float,
+                     liquidez_usd: float | None = None,
+                     idade_minutos_compra: float | None = None,
+                     top_holder_pct: float | None = None,
+                     holders_disponivel: bool | None = None) -> dict:
     """Compra 'valor_usd' de um token AINDA na bonding curve.
+
+    Os 4 ultimos parametros (opcionais) sao so a "fotografia" das
+    condicoes do token no momento da compra, guardada no historico para
+    diagnostico futuro - nao mudam a logica de compra em si.
 
     Fluxo:
       1. Le o estado da curva; se ja graduou ('complete'), recusa.
@@ -303,7 +311,11 @@ def comprar_na_curva(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: f
         if not carteira.registar_compra(simbolo, teto, mint=mint,
                                         preco_unitario_usd=preco_unit_usd,
                                         quantidade_tokens=tokens,
-                                        dex="pump-fun", modo="bonding_curve"):
+                                        dex="pump-fun", modo="bonding_curve",
+                                        liquidez_usd=liquidez_usd,
+                                        idade_minutos_compra=idade_minutos_compra,
+                                        top_holder_pct=top_holder_pct,
+                                        holders_disponivel=holders_disponivel):
             return {"sucesso": False, "dry_run": True,
                     "mensagem": f"[SIMULADO] Saldo virtual insuficiente para {simbolo}"}
         posicoes.abrir_posicao(

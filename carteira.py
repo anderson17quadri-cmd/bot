@@ -86,7 +86,11 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
                     quantidade_tokens: float | None = None,
                     chain: str = "solana",
                     dex: str | None = None,
-                    modo: str = "normal") -> bool:
+                    modo: str = "normal",
+                    liquidez_usd: float | None = None,
+                    idade_minutos_compra: float | None = None,
+                    top_holder_pct: float | None = None,
+                    holders_disponivel: bool | None = None) -> bool:
     """Debita o valor da compra do saldo virtual. Devolve False (e nao
     debita nada) se nao houver saldo suficiente OU se o valor falhar a
     verificacao de sanidade (protecao contra bugs de unidades).
@@ -99,6 +103,14 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
       modo               -> qual dos 4 modos de compra fez esta operacao
                             (normal|bonding_curve|sniper_rapido|copy_trading)
                             - usado pelas estatisticas "por modo"/"por DEX"
+      liquidez_usd, idade_minutos_compra, top_holder_pct, holders_disponivel
+                         -> "fotografia" das condicoes do token NO MOMENTO
+                            da compra. Adicionados apos o diagnostico do
+                            Modo Caveira - sem isto, era impossivel olhar
+                            para tras e perceber que tipo de token estava
+                            a perder dinheiro (so ficava dex/modo, nao as
+                            condicoes de mercado). Usado por
+                            diagnostico_caveira.py.
     Assim o historico fica completo mesmo depois de a posicao fechar."""
     if not _sanidade_ok(valor_usd, "compra", simbolo):
         return False
@@ -113,6 +125,10 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
         "mint": mint, "chain": chain, "dex": dex, "modo": modo,
         "preco_unitario_usd": preco_unitario_usd,
         "quantidade_tokens": quantidade_tokens,
+        "liquidez_usd": liquidez_usd,
+        "idade_minutos_compra": idade_minutos_compra,
+        "top_holder_pct": top_holder_pct,
+        "holders_disponivel": holders_disponivel,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     _guardar(dados)

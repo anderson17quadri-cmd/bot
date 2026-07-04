@@ -108,12 +108,16 @@ def valor_atual_usd(mint: str, quantidade_tokens: float) -> float | None:
         return None
 
 
-def comprar_token(mint: str, simbolo: str, valor_usd: float, dex: str | None = None) -> dict:
+def comprar_token(mint: str, simbolo: str, valor_usd: float, dex: str | None = None,
+                  liquidez_usd: float | None = None,
+                  idade_minutos_compra: float | None = None) -> dict:
     """Compra 'valor_usd' do token (contrato 0x...) pagando em BNB.
 
     Aplica o limite BSC_MAX_TRADE_USD. Em dry-run so simula (com cotacao
     real da PancakeSwap). Em real, constroi + estima gas + [talvez] envia.
     'dex' e so para as estatisticas "por DEX" do dashboard (ex: "pancakeswap").
+    'liquidez_usd'/'idade_minutos_compra' sao so para diagnostico futuro
+    (fotografia das condicoes do token no momento da compra).
     """
     teto = min(valor_usd, config.BSC_MAX_TRADE_USD)
     if teto <= 0:
@@ -146,7 +150,9 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, dex: str | None = N
         if not carteira.registar_compra(simbolo, teto, mint=mint,
                                         preco_unitario_usd=preco_unit_usd,
                                         quantidade_tokens=tokens_estimados,
-                                        chain="bsc", dex=dex, modo="normal"):
+                                        chain="bsc", dex=dex, modo="normal",
+                                        liquidez_usd=liquidez_usd,
+                                        idade_minutos_compra=idade_minutos_compra):
             return {"sucesso": False, "dry_run": True,
                     "mensagem": f"[SIMULADO][BSC] Saldo virtual insuficiente para {simbolo}"}
         posicoes.abrir_posicao(mint=mint, simbolo=simbolo, valor_investido_usd=teto,

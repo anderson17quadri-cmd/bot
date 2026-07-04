@@ -191,7 +191,11 @@ def _executar_swap_real(cotacao: dict) -> str:
 
 def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float,
                   decimais: int | None = None, dex: str | None = None,
-                  modo: str = "normal", pool_address: str | None = None) -> dict:
+                  modo: str = "normal", pool_address: str | None = None,
+                  liquidez_usd: float | None = None,
+                  idade_minutos_compra: float | None = None,
+                  top_holder_pct: float | None = None,
+                  holders_disponivel: bool | None = None) -> dict:
     """Compra 'valor_usd' dolares do token 'mint', pagando em SOL.
 
     'preco_sol_usd' e o preco atual do SOL em USD, usado so para converter
@@ -200,7 +204,10 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
     inteiro - se vier None, o dashboard cai para um lookup proprio.
     'dex'/'modo' sao so para as estatisticas "por modo"/"por DEX" do
     dashboard - guardados na posicao e no historico, nunca mudam a logica
-    de compra em si.
+    de compra em si. 'liquidez_usd'/'idade_minutos_compra'/'top_holder_pct'/
+    'holders_disponivel' sao a "fotografia" das condicoes do token no
+    momento da compra, guardadas so para diagnostico futuro (ver
+    diagnostico_caveira.py).
 
     Devolve um dict com o resultado (sucesso, dry_run, detalhes).
     """
@@ -223,6 +230,8 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
             preco_unitario_usd=preco_compra_estimado,
             quantidade_tokens=quantidade_tokens_estimada,
             dex=dex, modo=modo,
+            liquidez_usd=liquidez_usd, idade_minutos_compra=idade_minutos_compra,
+            top_holder_pct=top_holder_pct, holders_disponivel=holders_disponivel,
         ):
             return {
                 "sucesso": False, "dry_run": True,

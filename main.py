@@ -200,6 +200,10 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
         r = executor_pumpfun.comprar_na_curva(
             mint=mint, simbolo=simbolo,
             valor_usd=config.PUMPFUN_MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
+            liquidez_usd=dados.get("liquidez_usd"),
+            idade_minutos_compra=dados.get("idade_minutos"),
+            top_holder_pct=dados.get("top_holder_pct"),
+            holders_disponivel=dados.get("holders_disponivel"),
         )
         cor = "green" if r.get("sucesso") else "yellow"
         alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
@@ -252,12 +256,23 @@ def _passa_filtro_qualidade_caveira(dados: dict) -> tuple[bool, str]:
     - com TODOS desligados, esta funcao e um no-op instantaneo (mesmo
     comportamento de antes desta funcionalidade existir).
 
-    Politica de dados em falta (decisao explicita, documentada no resumo):
-    se a CHAMADA RPC falhar (disponivel=False), SALTAMOS os sinais de
-    momentum (nao bloqueiam - falha de rede nao e culpa do token). Mas se
-    a chamada TIVER sucesso e devolver zero atividade real (0 compradores,
-    0 transacoes), isso conta a serio contra o token - e exatamente o
-    sinal "nasceu e ninguem quer" que motivou este filtro.
+    POLITICA DE DADOS EM FALTA - MUDADA apos diagnostico (ver resumo desta
+    sessao): antes, se a chamada RPC falhasse, os sinais de momentum eram
+    SALTADOS (fail-open, nao bloqueava). Na pratica, num RPC publico (o
+    default do bot), estas chamadas falham/rate-limitam com frequencia -
+    o que significava que a maioria das compras do Caveira pagava os 5s+
+    de atraso da janela de momentum SEM ganhar nenhuma seletividade real
+    (o filtro fazia fail-open quase sempre). Resultado observado: pior
+    timing de entrada, sem melhor selecao - exatamente o padrao dos
+    numeros reportados (win rate a piorar apos este filtro entrar).
+    Agora e FAIL-CLOSED: se nao conseguirmos confirmar a atividade real
+    (RPC falhou), REJEITAMOS o token - o Caveira so compra quando tem a
+    certeza da qualidade, nao quando simplesmente nao conseguiu verificar.
+    AVISO IMPORTANTE: isto significa que num RPC publico o Caveira pode
+    passar a comprar MUITO menos (ou quase nada) - e o preco de ser
+    realmente seletivo. Se quiseres que o Caveira dispare com regularidade,
+    precisas de um RPC melhor (Helius/QuickNode) para estas chamadas
+    terem sucesso com frequencia suficiente.
     """
     algum_filtro_ativo = (
         config.CAVEIRA_RATIO_COMPRA_VENDA_MIN > 0
@@ -287,7 +302,8 @@ def _passa_filtro_qualidade_caveira(dados: dict) -> tuple[bool, str]:
     m = momentum.analisar_momentum(mint, excluir=excluir)
 
     if not m["disponivel"]:
-        return True, "dados de momentum indisponiveis (RPC falhou) - nao bloqueia"
+        return False, ("dados de momentum INDISPONIVEIS (RPC falhou/rate-limitou) - "
+                       "FAIL-CLOSED: sem confirmar atividade real, nao arrisca a compra")
 
     if config.CAVEIRA_TRANSACOES_MIN > 0 and m["transacoes_total"] < config.CAVEIRA_TRANSACOES_MIN:
         return False, (f"so {m['transacoes_total']} transacao(oes) desde a criacao "
@@ -387,7 +403,11 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
                                    valor_usd=valor, preco_sol_usd=preco_sol_usd,
                                    decimais=dados.get("decimais"),
                                    dex=dados.get("dex"), modo="sniper_rapido",
-                                   pool_address=dados.get("pool_address"))
+                                   pool_address=dados.get("pool_address"),
+                                   liquidez_usd=dados.get("liquidez_usd"),
+                                   idade_minutos_compra=dados.get("idade_minutos"),
+                                   top_holder_pct=dados.get("top_holder_pct"),
+                                   holders_disponivel=dados.get("holders_disponivel"))
         if r.get("sucesso"):
             posicoes.atualizar_posicao(mint, sniper_rapido=True)
             if config.DRY_RUN:
@@ -539,7 +559,9 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
     try:
         import executor_bsc
         r = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD,
-                                       dex=dados.get("dex"))
+                                       dex=dados.get("dex"),
+                                       liquidez_usd=dados.get("liquidez_usd"),
+                                       idade_minutos_compra=dados.get("idade_minutos"))
         cor = "green" if r.get("sucesso") else "yellow"
         alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
         if r.get("sucesso"):
@@ -608,6 +630,10 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
             decimais=dados.get("decimais"),
             dex=dados.get("dex"), modo="normal",
             pool_address=dados.get("pool_address"),
+            liquidez_usd=dados.get("liquidez_usd"),
+            idade_minutos_compra=dados.get("idade_minutos"),
+            top_holder_pct=dados.get("top_holder_pct"),
+            holders_disponivel=dados.get("holders_disponivel"),
         )
         etiqueta = "[SIMULADO]" if resultado["dry_run"] else "[REAL]"
         alerts.info(f"[green]{etiqueta} COMPRA: {resultado['mensagem']}[/green]")
