@@ -41,6 +41,12 @@ def _env_float(nome: str, defeito: float) -> float:
 # ==========================================================================
 SOLANA_RPC_URL = _env_texto("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 
+# Endpoints Jupiter (agregador de swaps Solana). Configuraveis (raramente
+# precisas de mudar) - so para nao ficarem hardcoded em varios ficheiros
+# (executor.py e dashboard.py usavam a mesma URL escrita 2x cada).
+JUPITER_QUOTE_URL = _env_texto("JUPITER_QUOTE_URL", "https://public.jupiterapi.com/quote")
+JUPITER_SWAP_URL = _env_texto("JUPITER_SWAP_URL", "https://public.jupiterapi.com/swap")
+
 # --- Autenticacao do dashboard ----------------------------------------
 # O dashboard controla dinheiro real (compras, vendas, envio de tokens,
 # mudanca para modo REAL). Sem password, NAO deve ficar exposto na rede.
@@ -133,6 +139,13 @@ JITO_BLOCK_ENGINE_URL = _env_texto(
 # 1000 lamports; um valor demasiado baixo raramente e includo. 100000
 # lamports (~0.0001 SOL) e um ponto de partida razoavel.
 JITO_TIP_LAMPORTS = _env_int("JITO_TIP_LAMPORTS", 100_000)
+# Conta de tip da Jito (para a compra na bonding curve, que NAO passa pela
+# Jupiter - ao contrario do executor.py normal, aqui somos NOS a construir
+# a transacao a mao, por isso somos nos a acrescentar a instrucao de
+# transferencia do tip). Um dos enderecos publicos oficiais da Jito -
+# confirma em jito.wtf/docs se ainda esta correto antes de confiar em
+# volume real.
+JITO_TIP_ACCOUNT = _env_texto("JITO_TIP_ACCOUNT", "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5")
 
 # --- Alertas Telegram (opcional) ---------------------------------------
 # Notificacoes de compra/venda/erro grave/mudanca de saldo via Telegram

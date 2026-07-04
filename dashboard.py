@@ -134,10 +134,6 @@ def logout():
     session.clear()
     return redirect(url_for("login") if config.DASHBOARD_PASSWORD else "/")
 
-# Mesmos endpoints do executor.py - so o /quote, que e uma consulta
-# inofensiva (nunca compra nem vende nada)
-JUPITER_QUOTE_URL = "https://public.jupiterapi.com/quote"
-
 # Cache de cotacoes: {mint: (timestamp_da_consulta, valor_usd)}
 # Evita bombardear a API da Jupiter - cada mint e consultado no maximo
 # uma vez a cada CACHE_SEGUNDOS, mesmo que a pagina faca polling rapido.
@@ -199,7 +195,7 @@ def _valor_atual_usd(mint: str, quantidade_tokens: float):
 
     # 2) Senao, pergunta a Jupiter (consulta apenas - nao mexe em dinheiro)
     try:
-        resposta = requests.get(JUPITER_QUOTE_URL, params={
+        resposta = requests.get(config.JUPITER_QUOTE_URL, params={
             "inputMint": mint,
             "outputMint": config.MINT_USDC,
             "amount": int(quantidade_tokens),

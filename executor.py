@@ -27,9 +27,6 @@ import wallet
 import posicoes
 import carteira
 
-JUPITER_QUOTE_URL = "https://public.jupiterapi.com/quote"
-JUPITER_SWAP_URL = "https://public.jupiterapi.com/swap"
-
 
 def _obter_cotacao(mint_entrada: str, mint_saida: str, quantidade_lamports: int) -> dict:
     """Pede uma cotacao a Jupiter. Funciona igual em dry-run ou real -
@@ -40,7 +37,7 @@ def _obter_cotacao(mint_entrada: str, mint_saida: str, quantidade_lamports: int)
         "amount": quantidade_lamports,
         "slippageBps": config.SLIPPAGE_BPS,
     }
-    resposta = requests.get(JUPITER_QUOTE_URL, params=params, timeout=15)
+    resposta = requests.get(config.JUPITER_QUOTE_URL, params=params, timeout=15)
     resposta.raise_for_status()
     return resposta.json()
 
@@ -148,7 +145,7 @@ def _executar_swap_real(cotacao: dict) -> str:
         "dynamicComputeUnitLimit": True,
         "prioritizationFeeLamports": prioridade,
     }
-    resposta = requests.post(JUPITER_SWAP_URL, json=payload, timeout=20)
+    resposta = requests.post(config.JUPITER_SWAP_URL, json=payload, timeout=20)
     resposta.raise_for_status()
     tx_base64 = resposta.json()["swapTransaction"]
 

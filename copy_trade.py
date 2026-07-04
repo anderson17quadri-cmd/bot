@@ -95,9 +95,9 @@ def registar_gasto(valor_usd: float) -> None:
 # --------------------------------------------------------------------------
 # Parte 2: Monitor das carteiras (thread de fundo)
 # --------------------------------------------------------------------------
-# Tokens "estaveis"/base que NAO contam como uma compra a copiar (a carteira
-# so os usa para pagar). SOL e USDC vem da config; junta-se o USDT.
-_USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+# Tokens "estaveis"/base que NAO contam como uma compra a copiar (a
+# carteira so os usa para pagar). Os 3 ja vem definidos no config.py -
+# nao ha necessidade de repetir o endereco do USDT aqui.
 
 
 def carteiras_configuradas() -> list[str]:
@@ -108,7 +108,7 @@ def carteiras_configuradas() -> list[str]:
 
 
 def _mints_estaveis() -> set[str]:
-    return {config.MINT_SOL, config.MINT_USDC, _USDT}
+    return {config.MINT_SOL, config.MINT_USDC, config.MINT_USDT}
 
 
 def _tokens_comprados(tx: dict, carteira: str) -> list[str]:

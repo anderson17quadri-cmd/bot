@@ -353,13 +353,28 @@ def _comprar_real(mint_str, simbolo, valor_usd, valor_sol, tokens_esperados,
         contas = _derivar_contas_buy(mint, comprador, estado)
         metas = [AccountMeta(pubkey=pk, is_signer=s, is_writable=w) for pk, s, w in contas]
         instrucao = Instruction(PROGRAMA_PUMP, dados, metas)
+        instrucoes = [instrucao]
+
+        # Jito: esta compra NAO passa pela Jupiter (a transacao e nossa,
+        # construida a mao a partir do IDL), por isso, ao contrario do
+        # executor.py normal, temos de acrescentar NOS MESMOS a instrucao
+        # de transferencia do tip - um simples transfer do System Program
+        # para a conta de tip da Jito.
+        usar_jito = config.JITO_ATIVO
+        if usar_jito:
+            tip_conta = Pubkey.from_string(config.JITO_TIP_ACCOUNT)
+            dados_tip = struct.pack("<I", 2) + struct.pack("<Q", config.JITO_TIP_LAMPORTS)
+            instrucoes.append(Instruction(
+                SYS_PROGRAM, dados_tip,
+                [AccountMeta(comprador, True, True), AccountMeta(tip_conta, False, True)],
+            ))
 
         # Blockhash recente para a mensagem
         bh = requests.post(config.SOLANA_RPC_URL, json={
             "jsonrpc": "2.0", "id": 1, "method": "getLatestBlockhash", "params": [],
         }, timeout=15).json()["result"]["value"]["blockhash"]
 
-        msg = MessageV0.try_compile(comprador, [instrucao], [], Hash.from_string(bh))
+        msg = MessageV0.try_compile(comprador, instrucoes, [], Hash.from_string(bh))
         tx = VersionedTransaction(msg, [keypair])
         tx_b64 = base64.b64encode(bytes(tx)).decode()
 
@@ -379,13 +394,20 @@ def _comprar_real(mint_str, simbolo, valor_usd, valor_sol, tokens_esperados,
                     "mensagem": ("[CURVA] simulacao OK, mas envio real bloqueado "
                                  "(PUMPFUN_PERMITIR_ENVIO_REAL=false). Nada foi gasto.")}
 
-        envio = requests.post(config.SOLANA_RPC_URL, json={
+        if usar_jito:
+            url_envio = config.JITO_BLOCK_ENGINE_URL.rstrip("/") + "/api/v1/transactions"
+            params_envio = [tx_b64, {"encoding": "base64"}]
+        else:
+            url_envio = config.SOLANA_RPC_URL
+            params_envio = [tx_b64, {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}]
+        envio = requests.post(url_envio, json={
             "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
-            "params": [tx_b64, {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}],
+            "params": params_envio,
         }, timeout=30).json()
         if "error" in envio:
+            origem_erro = "Jito" if usar_jito else "RPC"
             return {"sucesso": False, "dry_run": False, "origem": "bonding_curve",
-                    "mensagem": f"[CURVA] RPC recusou a transacao: {envio['error']}"}
+                    "mensagem": f"[CURVA] {origem_erro} recusou a transacao: {envio['error']}"}
 
         assinatura = envio["result"]
         import posicoes
