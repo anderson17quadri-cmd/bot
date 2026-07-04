@@ -391,6 +391,12 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
     if score > config.SCORE_COMPRA_MAX:
         return
 
+    # Piso de liquidez (mesma regra do caminho Solana): nao compra tokens
+    # com liquidez abaixo da minima conhecida.
+    liquidez = dados.get("liquidez_usd") or 0.0
+    if liquidez < config.LIQUIDEZ_MINIMA_USD:
+        return
+
     mint = dados["token_mint"]
     simbolo = dados["token_simbolo"]
     if mint in posicoes.listar_posicoes_abertas():
@@ -430,6 +436,20 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
     score = analise_ia["score_final"]
     if score > config.SCORE_COMPRA_MAX:
         return  # risco demasiado alto, nao compra
+
+    # Piso de liquidez no caminho NORMAL: so compra por aqui um token com
+    # liquidez real conhecida. Sem isto, o BONUS de "LP bloqueado" do
+    # pump.fun (-20) cancelava a penalizacao de liquidez baixa (+20), dando
+    # score 0 e comprando tokens com liquidez $0/desconhecida (observado ao
+    # vivo). Tokens pump.fun recem-nascidos sao para o modo bonding curve
+    # (que le a curva on-chain), nao para este caminho.
+    liquidez = dados.get("liquidez_usd") or 0.0
+    if liquidez < config.LIQUIDEZ_MINIMA_USD:
+        alerts.info(
+            f"[dim]{dados['token_simbolo']}: liquidez ${liquidez:,.0f} < minima "
+            f"${config.LIQUIDEZ_MINIMA_USD:,.0f} - nao compra no caminho normal[/dim]"
+        )
+        return
 
     mint = dados["token_mint"]
     simbolo = dados["token_simbolo"]

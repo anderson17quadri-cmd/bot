@@ -240,6 +240,13 @@ DEPLOYER_JANELA_HORAS = _env_int("DEPLOYER_JANELA_HORAS", 48)    # janela de con
 LIQUIDEZ_SUSPEITA_USD = _env_float("LIQUIDEZ_SUSPEITA_USD", 25000.0)
 IDADE_SUSPEITA_MINUTOS = _env_float("IDADE_SUSPEITA_MINUTOS", 5.0)
 
+# Sinais on-chain AVANCADOS (liquidez bloqueada via Raydium + historico do
+# deployer via Helius) sao os que mais chamadas gastam. Liga/desliga-os
+# para conter o custo de RPC/Helius em 24/7 (plano gratuito). Desligados,
+# esses sinais ficam "desconhecido"/None (neutros no score), mas o
+# essencial (autoridades + holders) continua. Default ON (sem mudanca).
+ANALISE_ONCHAIN_AVANCADA = _env_texto("ANALISE_ONCHAIN_AVANCADA", "true").lower() in ("1", "true", "yes", "sim")
+
 
 # ==========================================================================
 # 6) Estado da configuracao (Fase 1)

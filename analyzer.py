@@ -168,25 +168,29 @@ def analisar_onchain(pool_info: dict) -> dict:
             top5_holders_pct = sum(h["pct"] for h in top_holders[:5])
 
     # -------- 3) Sinais avancados (todos tolerantes a falha) --------
-
-    # 3a) Liquidez bloqueada/queimada - "queimada" | "bloqueada_protocolo"
-    #     | "nao_bloqueada" | "desconhecido". Para pump.fun/pumpswap nao
-    #     gasta nenhuma chamada; para Raydium v4 sao 3 chamadas RPC.
-    liquidez_bloqueada = rpc.verificar_liquidez_bloqueada(
-        pool_info.get("pool_address", ""), pool_info.get("dex", "")
-    )
-
-    # 3b) Historico do deployer - SO se a liquidez passou no filtro minimo
-    #     (nao vale a pena gastar chamadas Helius em tokens que ja iam ser
-    #     descartados por liquidez baixa)
+    # Sao os que mais chamadas gastam (Raydium: 3 RPC; deployer: 2 RPC + 1
+    # Helius). So os corremos se ANALISE_ONCHAIN_AVANCADA estiver ligado E
+    # ja tivermos conseguido ler o mint on-chain (se o RPC ja nos limitou,
+    # martelar mais chamadas so piora o rate limit e falharia na mesma).
+    # Desligados/indisponiveis -> ficam neutros (mais conservador: perde-se
+    # o BONUS do LP bloqueado, o que SOBE o score, nunca desce).
+    liquidez_bloqueada = "desconhecido"
     deployer = None
     deployer_tokens_criados = None
-    if pool_info["liquidez_usd"] >= config.LIQUIDEZ_MINIMA_USD:
-        deployer = rpc.obter_deployer(mint)
-        if deployer:
-            deployer_tokens_criados = rpc.contar_tokens_criados(
-                deployer, janela_horas=config.DEPLOYER_JANELA_HORAS
-            )
+    if config.ANALISE_ONCHAIN_AVANCADA and onchain_disponivel:
+        # 3a) Liquidez bloqueada/queimada. Para pump.fun/pumpswap nao gasta
+        #     chamadas (deteta pelo dex); para Raydium v4 sao 3 chamadas RPC.
+        liquidez_bloqueada = rpc.verificar_liquidez_bloqueada(
+            pool_info.get("pool_address", ""), pool_info.get("dex", "")
+        )
+        # 3b) Historico do deployer - SO se a liquidez passou no filtro
+        #     minimo (nao gastar Helius em tokens que ja iam ser descartados)
+        if pool_info["liquidez_usd"] >= config.LIQUIDEZ_MINIMA_USD:
+            deployer = rpc.obter_deployer(mint)
+            if deployer:
+                deployer_tokens_criados = rpc.contar_tokens_criados(
+                    deployer, janela_horas=config.DEPLOYER_JANELA_HORAS
+                )
 
     # 3c) Liquidez suspeita para a idade (nao gasta chamadas nenhumas)
     idade = pool_info.get("idade_minutos", -1)
