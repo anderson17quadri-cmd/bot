@@ -82,6 +82,26 @@ PAUSA_ENTRE_TOKENS = _env_float("PAUSA_ENTRE_TOKENS", 1.0)
 # ciclo (verificar_posicoes), independente disto.
 COOLDOWN_REANALISE_MINUTOS = _env_int("COOLDOWN_REANALISE_MINUTOS", 10)
 
+# --- Metodo de deteccao: polling (GeckoTerminal) vs websocket (Helius) ---
+# "polling"   -> o detector.py de sempre, pergunta a GeckoTerminal de X em
+#                X segundos. Fiavel, funciona em qualquer RPC, so-Solana+BSC.
+# "websocket" -> o detector_websocket.py (logsSubscribe do Helius): recebe
+#                um aviso INSTANTANEO assim que um token pump.fun e criado,
+#                em vez de perguntar. Muito mais rapido a SABER do token,
+#                mas experimental e so pump.fun/Solana. Precisa de um RPC
+#                que suporte WebSocket (Helius suporta; o publico nao).
+# Por defeito "polling" (o que ja funciona). So muda se ligares de
+# proposito. Podes por os dois: "polling,websocket" corre ambos.
+METODO_DETECCAO = _env_texto("METODO_DETECCAO", "polling")
+
+# WebSocket do RPC: derivado do SOLANA_RPC_URL trocando http->ws. Se o teu
+# RPC tiver um endpoint WS diferente, define-o aqui explicitamente.
+SOLANA_WS_URL = _env_texto("SOLANA_WS_URL", "")
+
+# Rate limiter (token bucket) para as chamadas RPC extra do websocket -
+# nunca ultrapassar o plano gratuito do Helius. Pedidos por segundo max.
+RPC_MAX_PEDIDOS_POR_SEGUNDO = _env_float("RPC_MAX_PEDIDOS_POR_SEGUNDO", 8.0)
+
 # --- Multi-chain (Parte B) ---------------------------------------------
 # REDE fica como a rede "principal"/legada (Solana) para o codigo antigo
 # que ainda a referencia. REDES_ATIVAS e a lista de redes a monitorizar
@@ -297,6 +317,7 @@ def resumo() -> str:
     linhas = [
         f"RPC Solana        : {SOLANA_RPC_URL}",
         f"Redes ativas      : {', '.join(REDES_ATIVAS)}",
+        f"Metodo deteccao   : {METODO_DETECCAO}",
         f"Intervalo polling : {POLL_INTERVAL_SEGUNDOS}s",
         f"Zona ambigua      : {ZONA_AMBIGUA_MIN}-{ZONA_AMBIGUA_MAX}",
         f"Liquidez minima   : {LIQUIDEZ_MINIMA_USD:.0f} USD",

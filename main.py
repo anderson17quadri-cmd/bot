@@ -627,12 +627,28 @@ def main() -> None:
         f"\n[dim]Redes ativas: {', '.join(config.REDES_ATIVAS)}. Ctrl+C para parar.[/dim]\n"
     )
 
-    # Um detector por rede ativa (Solana e/ou BSC) - correm em paralelo,
-    # cada um com o seu proprio estado de "ja vistos".
-    detetores = [
-        detector.DetectorPools(rede, emitir_no_arranque=3)
-        for rede in config.REDES_ATIVAS
-    ]
+    # Detetores a usar, conforme METODO_DETECCAO ("polling", "websocket"
+    # ou ambos: "polling,websocket"). Todos expoem .rede e .buscar_novos(),
+    # por isso o ciclo trata-os da mesma forma.
+    metodos = [m.strip().lower() for m in config.METODO_DETECCAO.split(",") if m.strip()]
+    detetores = []
+    if "polling" in metodos or not metodos:
+        # Um detector de polling por rede ativa (Solana e/ou BSC)
+        detetores += [
+            detector.DetectorPools(rede, emitir_no_arranque=3)
+            for rede in config.REDES_ATIVAS
+        ]
+    if "websocket" in metodos:
+        # Deteccao instantanea de pump.fun via logsSubscribe (so Solana).
+        # Importado aqui para nao obrigar a ter a lib 'websockets' quando
+        # nao se usa este metodo.
+        try:
+            import detector_websocket
+            detetores.append(detector_websocket.DetectorWebsocket("solana"))
+            alerts.console.print("[dim]Deteccao WebSocket (pump.fun) ativa.[/dim]")
+        except Exception as e:
+            alerts.info(f"[red]Nao consegui iniciar a deteccao WebSocket:[/red] {e}")
+    alerts.console.print(f"[dim]Metodo(s) de deteccao: {', '.join(metodos) or 'polling'}[/dim]\n")
     ciclo = 0
     ultima_verificacao_posicoes = 0.0
 
@@ -677,7 +693,14 @@ def main() -> None:
                 alerts.info(f"[red]Erro a reavaliar a watchlist:[/red] {e}")
             ultima_verificacao_posicoes = agora
 
-        time.sleep(config.POLL_INTERVAL_SEGUNDOS)
+        # Cadencia do ciclo: com WebSocket ativo drenamos a fila depressa
+        # (2s), senao anulava-se a vantagem de velocidade - o token chega
+        # ao WS de imediato, mas so seria processado no proximo ciclo. Sem
+        # WebSocket, mantemos o intervalo de polling normal.
+        if "websocket" in metodos:
+            time.sleep(2)
+        else:
+            time.sleep(config.POLL_INTERVAL_SEGUNDOS)
 
 
 def _sair_limpo(signum, frame):

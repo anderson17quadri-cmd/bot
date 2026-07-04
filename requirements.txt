@@ -19,3 +19,8 @@ qrcode>=7.4           # QR code do endereco da wallet (pure-Python, SVG sem pill
 # BSC (Parte B) - assinatura de transacoes Ethereum, pure-Python
 # ============================================================
 eth-account>=0.11   # assinar swaps na PancakeSwap sem web3.py completo
+
+# ============================================================
+# Deteccao WebSocket (opcional, METODO_DETECCAO=websocket)
+# ============================================================
+websockets>=12.0    # logsSubscribe ao RPC (Helius) - deteccao instantanea pump.fun
