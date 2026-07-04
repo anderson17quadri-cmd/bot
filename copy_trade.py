@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 
 import config
 import rpc
+from conjunto_limitado import ConjuntoLimitado
 
 # --------------------------------------------------------------------------
 # Parte 1: Limite diario (mesmo padrao do sniper_rapido.py, ficheiro proprio)
@@ -159,7 +160,9 @@ class CopyTrader:
         self._limitador = limitador
         self._ultima_sig: dict[str, str | None] = {}
         self._fila: list[dict] = []
-        self._vistos: set[str] = set()  # (carteira|mint) ja emitidos, dedup
+        # (carteira|mint) ja emitidos, dedup; capacidade limitada para nao
+        # crescer sem limite em 24/7 (ver conjunto_limitado.py)
+        self._vistos = ConjuntoLimitado(capacidade=5000)
         self._lock = threading.Lock()
         self._parar = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)

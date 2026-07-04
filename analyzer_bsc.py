@@ -87,6 +87,10 @@ def analisar(pool_info: dict) -> dict:
         "mint_authority": None,
         "freeze_authority": None,
         "supply": None,
+        # BSC/ERC-20 usa quase sempre 18 decimais (o mesmo padrao que
+        # executor_bsc.py ja assume ao guardar quantidade_tokens). Nao
+        # confirmado por leitura on-chain aqui - e so o valor tipico.
+        "decimais": 18,
         "holders_disponivel": False,
         "top_holder_pct": 0.0,
         "top5_holders_pct": 0.0,

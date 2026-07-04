@@ -28,6 +28,7 @@ from collections import deque
 from datetime import datetime, timezone
 
 import config
+from conjunto_limitado import ConjuntoLimitado
 
 # Programa do pump.fun e discriminator (8 bytes) do evento de criacao,
 # retirados do IDL oficial (idl/pump.json).
@@ -125,7 +126,9 @@ class DetectorWebsocket:
     def __init__(self, rede: str = "solana", emitir_no_arranque: int = 0):
         self.rede = rede  # sempre "solana" - o pump.fun so existe na Solana
         self._fila: deque = deque()
-        self._vistos: set[str] = set()  # mints ja emitidos (dedup)
+        # mints ja emitidos (dedup); capacidade limitada para nao crescer
+        # sem limite em 24/7 (ver conjunto_limitado.py)
+        self._vistos = ConjuntoLimitado(capacidade=5000)
         self._lock = threading.Lock()
         self._parar = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)

@@ -23,6 +23,7 @@ import requests
 
 import config
 import html
+from conjunto_limitado import ConjuntoLimitado
 
 # Base da GeckoTerminal; a rede (solana/bsc) e escolhida por chamada.
 # Documentacao: https://www.geckoterminal.com/dex-api
@@ -100,12 +101,22 @@ def _interpretar_pool(pool: dict, rede: str) -> dict | None:
     bases = config.CHAINS[rede]["bases"]
     base_norm = base_mint.lower() if rede == "bsc" else base_mint
     quote_norm = quote_mint.lower() if rede == "bsc" else quote_mint
-    if base_norm in bases and quote_norm not in bases:
+    base_e_base = base_norm in bases
+    quote_e_base = quote_norm in bases
+
+    if base_e_base and not quote_e_base:
         token_mint, token_simbolo = quote_mint, simbolo_quote
         contra_mint, contra_simbolo = base_mint, simbolo_base
-    else:
+    elif quote_e_base and not base_e_base:
         token_mint, token_simbolo = base_mint, simbolo_base
         contra_mint, contra_simbolo = quote_mint, simbolo_quote
+    else:
+        # Nenhum lado e uma base conhecida (pool TOKEN/TOKEN) OU os DOIS
+        # sao (ex: pool SOL/USDC) - nao ha um lado claramente "o token
+        # novo". Adivinhar arrisca analisar/comprar o lado errado; mais
+        # seguro descartar este pool do que inventar (filosofia do bot:
+        # nunca fingir que sabemos o que nao sabemos).
+        return None
 
     # Sem endereco do token nao ha nada a analisar
     if not token_mint:
@@ -167,8 +178,10 @@ class DetectorPools:
     def __init__(self, rede: str = "solana", emitir_no_arranque: int = 3):
         # Que rede este detector monitoriza ("solana" ou "bsc")
         self.rede = rede
-        # Conjunto de enderecos de pool ja processados (para nao repetir alertas)
-        self._vistos: set[str] = set()
+        # Enderecos de pool ja processados (para nao repetir alertas).
+        # Capacidade limitada: em 24/7 um set() normal cresceria para
+        # sempre (fuga de memoria lenta) - ver conjunto_limitado.py.
+        self._vistos = ConjuntoLimitado(capacidade=5000)
         # Na primeira vez, quantos pools recentes emitir logo (para veres
         # output imediato no arranque). Depois disso, so emite os genuinamente novos.
         self._emitir_no_arranque = emitir_no_arranque

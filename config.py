@@ -192,7 +192,14 @@ CHAINS = {
     "solana": {
         "gecko": "solana",
         "prefixo": "solana_",
-        "bases": {m.lower() for m in MINTS_BASE_CONHECIDOS},
+        # BUG CORRIGIDO: enderecos Solana (base58) sao sensiveis a
+        # maiusculas/minusculas - ao contrario da BSC (hex, 0x...), NAO se
+        # pode fazer .lower() aqui. Isto fazia esta comparacao nunca bater
+        # certo (detector.py compara sem alterar o case na Solana), e o
+        # detetor caia sempre no "else" - por coincidencia quase sempre
+        # correto (a convencao da GeckoTerminal costuma por o token novo
+        # como base), mas nao por desenho.
+        "bases": set(MINTS_BASE_CONHECIDOS),
         "moeda": "SOL",
     },
     "bsc": {
