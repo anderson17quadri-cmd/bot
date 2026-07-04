@@ -360,13 +360,14 @@ PUMPFUN_PERMITIR_ENVIO_REAL = _env_texto("PUMPFUN_PERMITIR_ENVIO_REAL", "false")
 # ==========================================================================
 # 7c) MODO SNIPER RAPIDO ("modo caveira") - O MAIS ARRISCADO DE TODOS
 # ==========================================================================
-# Compra quase instantanea assim que um token e detetado, usando SO as
-# verificacoes on-chain rapidas que ja existem (mint/freeze authority,
-# liquidez minima) - SEM esperar pela analise da DeepSeek. Aceita scores
-# heuristicos muito mais altos (ate 50, contra 20 do modo normal) porque
-# prioriza velocidade sobre seguranca: o objetivo e apanhar os poucos
-# tokens que disparam nos primeiros segundos, aceitando que a maioria das
-# compras deste modo vai dar prejuizo pequeno (e o "custo de entrada").
+# Compra quase instantanea assim que um token e detetado, usando uma
+# CHECKLIST BINARIA sim/nao sobre os dados on-chain rapidos (autoridades,
+# liquidez, idade - ver abaixo) SEM esperar pela analise da DeepSeek, mais
+# o filtro de qualidade opcional por momentum (ver secao seguinte). Nao
+# usa o score heuristico (isso e o modo normal) - prioriza velocidade
+# sobre a analise completa: o objetivo e apanhar os poucos tokens que
+# disparam nos primeiros segundos, aceitando que uma parte das compras
+# deste modo vai dar prejuizo pequeno (e o "custo de entrada").
 # A analise completa (DeepSeek) continua a correr por tras; se vier um
 # score mau para uma posicao comprada por este modo, ela e vendida de
 # imediato (a IA funciona aqui como uma 2a camada de protecao, depois
@@ -444,7 +445,7 @@ def limite_sanidade_trade_usd() -> float:
 
 
 # ==========================================================================
-# 7c) Envio de tokens SPL da carteira (dashboard) - acao com dinheiro real
+# 7d) Envio de tokens SPL da carteira (dashboard) - acao com dinheiro real
 # ==========================================================================
 # Enviar tokens e IRREVERSIVEL. Como no pump.fun e na BSC, o envio
 # on-chain em modo REAL so acontece se esta trava for explicitamente

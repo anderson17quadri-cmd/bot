@@ -312,6 +312,31 @@ def _enviar_tx(conta, tx_base: dict) -> str:
     return _rpc("eth_sendRawTransaction", ["0x" + assinada.raw_transaction.hex()])
 
 
+def _esperar_confirmacao_bsc(tx_hash: str, timeout: float) -> bool:
+    """Espera ate a transacao ter um recibo on-chain (eth_getTransactionReceipt)
+    com status de sucesso. Devolve True se confirmou com sucesso, False se
+    reverteu ou nao confirmou a tempo. Nunca levanta - falhas de rede
+    tambem contam como 'nao confirmou'.
+
+    BUG CORRIGIDO (corrida approve->swap): antes, o approve era enviado e
+    logo a seguir o swap tentava eth_estimateGas - mas o node avalia
+    'latest' (o ultimo bloco CONFIRMADO), e o approve podia ainda nao la
+    estar. O estimateGas do swap falhava a achar allowance suficiente
+    mesmo o approve tendo sido aceite (so ainda nao confirmado) - um
+    falso negativo, nao um problema real da transacao."""
+    fim = time.time() + timeout
+    while time.time() < fim:
+        try:
+            recibo = _rpc("eth_getTransactionReceipt", [tx_hash])
+            if recibo is not None:
+                # status "0x1" = sucesso; "0x0" = revertida
+                return recibo.get("status") == "0x1"
+        except Exception:
+            pass
+        time.sleep(2)
+    return False
+
+
 def _vender_real(mint, pos, quantidade, percentagem, bnb_wei, valor_recebido_usd,
                  investido_proporcional, preco_venda_usd) -> dict:
     """Caminho REAL da venda: approve (se preciso) + swap. NAO validado
@@ -343,11 +368,19 @@ def _vender_real(mint, pos, quantidade, percentagem, bnb_wei, valor_recebido_usd
                     "mensagem": ("[BSC] venda pronta, mas envio real bloqueado "
                                  "(BSC_PERMITIR_ENVIO_REAL=false). Nada foi vendido.")}
 
-        # approve "infinito" (padrao) para nao repetir em vendas futuras
+        # approve "infinito" (padrao) para nao repetir em vendas futuras.
+        # IMPORTANTE: esperamos a CONFIRMACAO do approve antes de seguir
+        # para o swap - senao o eth_estimateGas do swap podia falhar a
+        # ver a allowance ainda nao confirmada (corrida ja corrigida).
         if precisa_approve:
             dados_approve = _SEL_APPROVE + encode(["address", "uint256"], [router, _MAX_UINT])
-            _enviar_tx(conta, {"to": to_checksum_address(mint), "value": 0,
-                               "data": "0x" + dados_approve.hex()})
+            approve_hash = _enviar_tx(conta, {"to": to_checksum_address(mint), "value": 0,
+                                              "data": "0x" + dados_approve.hex()})
+            if not _esperar_confirmacao_bsc(approve_hash, config.CONFIRMAR_TX_SEGUNDOS):
+                return {"sucesso": False, "dry_run": False, "chain": "bsc",
+                        "mensagem": (f"[BSC] approve enviado (tx {approve_hash[:12]}...) mas nao "
+                                     f"confirmou a tempo - venda abortada por seguranca, posicao mantida. "
+                                     f"Confirma o approve on-chain antes de tentar de novo.")}
 
         # swapExactTokensForETHSupportingFeeOnTransferTokens (aguenta tokens com taxa)
         dados_swap = _SEL_SWAP_TOKENS_FOR_ETH + encode(
