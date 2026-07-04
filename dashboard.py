@@ -508,6 +508,18 @@ def api_posicoes():
             preco_compra_raw * (10 ** decimais) if decimais is not None else None
         )
 
+        # Nivel de stop do trailing puro (so faz sentido nesse modo): pico
+        # ja atingido menos TRAILING_PURO_PCT%, convertido para preco por
+        # token inteiro (mesma conversao do preco de compra acima).
+        pico_raw = p.get("pico_preco_usd")
+        pico_por_token = (
+            pico_raw * (10 ** decimais) if (pico_raw is not None and decimais is not None) else None
+        )
+        nivel_stop_trailing_usd = None
+        modo_saida_atual = _ler_texto_do_env("MODO_SAIDA", "take_profit_parcial")
+        if modo_saida_atual == "trailing_puro" and pico_por_token:
+            nivel_stop_trailing_usd = pico_por_token * (1 - config.TRAILING_PURO_PCT / 100)
+
         lista.append({
             "mint": mint,
             "simbolo": p.get("simbolo", "?"),
@@ -529,6 +541,10 @@ def api_posicoes():
             "gestao_automatica": p.get("gestao_automatica", True),
             "valor_atual_usd": round(valor_atual, 2) if valor_atual is not None else None,
             "lucro_nao_realizado_usd": lucro_nao_realizado,
+            # So preenchido quando MODO_SAIDA=trailing_puro (None nos outros)
+            "nivel_stop_trailing_usd": (
+                round(nivel_stop_trailing_usd, 10) if nivel_stop_trailing_usd is not None else None
+            ),
         })
 
     # Mais recente primeiro, como na tabela de historico
@@ -1026,7 +1042,28 @@ def _ler_bool_do_env(chave: str, defeito: bool = False) -> bool:
 def _escrever_bool_no_env(chave: str, valor: bool) -> None:
     """Atualiza SO a linha 'chave=...' do .env (atomico), preservando o
     resto. Reutiliza a mesma logica do DRY_RUN mas para qualquer chave."""
-    texto = "true" if valor else "false"
+    _escrever_texto_no_env(chave, "true" if valor else "false")
+
+
+def _ler_texto_do_env(chave: str, defeito: str) -> str:
+    """Le uma chave de texto livre do .env (relida a cada pedido). Sem a
+    linha -> devolve o defeito. Usada para MODO_SAIDA (nao e booleano)."""
+    if not os.path.exists(".env"):
+        return defeito
+    try:
+        with open(".env", "r", encoding="utf-8") as f:
+            for linha in f:
+                linha = linha.strip()
+                if linha.startswith(f"{chave}="):
+                    return linha.split("=", 1)[1].strip().strip('"').strip("'") or defeito
+    except OSError:
+        pass
+    return defeito
+
+
+def _escrever_texto_no_env(chave: str, texto: str) -> None:
+    """Atualiza SO a linha 'chave=...' do .env (atomico), preservando o
+    resto."""
     linhas = []
     substituida = False
     if os.path.exists(".env"):
@@ -1252,6 +1289,37 @@ def api_modo():
         "dry_run": novo_dry_run,
         "precisa_reiniciar": a_correr,
     })
+
+
+@app.route("/api/modo_saida")
+def api_modo_saida():
+    """Estado do modo de SAIDA de uma posicao (como sair de uma posicao a
+    subir): 'take_profit_parcial' (default) ou 'trailing_puro'."""
+    return jsonify({
+        "modo_saida": _ler_texto_do_env("MODO_SAIDA", "take_profit_parcial"),
+        "trailing_puro_pct": config.TRAILING_PURO_PCT,
+        "take_profit_multiplicador": config.TAKE_PROFIT_MULTIPLICADOR,
+        "take_profit_vender_pct": config.TAKE_PROFIT_VENDER_PCT,
+        "trailing_stop_pct": config.TRAILING_STOP_PCT,
+        "stop_loss_pct": config.STOP_LOSS_PCT,
+    })
+
+
+@app.route("/api/modo_saida", methods=["POST"])
+def api_modo_saida_toggle():
+    """Muda MODO_SAIDA no .env. So aceita os 2 valores validos - o STOP_LOSS_PCT
+    normal (desde o preco de compra) continua ativo em AMBOS os modos."""
+    corpo = request.get_json(silent=True) or {}
+    modo = corpo.get("modo_saida")
+    if modo not in ("take_profit_parcial", "trailing_puro"):
+        return jsonify({
+            "ok": False,
+            "erro": "modo_saida tem de ser 'take_profit_parcial' ou 'trailing_puro'.",
+        }), 400
+
+    _escrever_texto_no_env("MODO_SAIDA", modo)
+    a_correr, _ = _estado_bot()
+    return jsonify({"ok": True, "modo_saida": modo, "precisa_reiniciar": a_correr})
 
 
 @app.route("/api/resetar", methods=["POST"])

@@ -327,6 +327,19 @@
     <!-- ================= 5. POSICOES ABERTAS ================= -->
     <section class="painel">
       <h2><svg class="icone" viewBox="0 0 24 24"><use href="#i-alvo"/></svg> Posições abertas <span class="ao-vivo">● ao vivo</span></h2>
+
+      <!-- Modo de saida: como o bot sai de uma posicao que esta a subir.
+           O stop-loss normal (desde o preco de compra) continua ativo em
+           AMBOS os modos - isto so muda o comportamento quando o preco SOBE. -->
+      <div class="config-modo-saida">
+        <label for="select-modo-saida">Modo de saída das posições:</label>
+        <select id="select-modo-saida" class="campo-filtro">
+          <option value="take_profit_parcial">Take-profit parcial (padrão)</option>
+          <option value="trailing_puro">Trailing stop puro</option>
+        </select>
+        <p class="explicacao-modo-saida" id="explicacao-modo-saida"></p>
+      </div>
+
       <div class="tabela-scroll">
         <table>
           <thead id="tabela-posicoes-cabecalho">
@@ -338,6 +351,7 @@
               <th class="th-sortavel" data-sort="timestamp_compra">Aberta há</th>
               <th class="th-sortavel" data-sort="valor_atual_usd">Valor atual</th>
               <th class="th-sortavel" data-sort="lucro_nao_realizado_usd">P/L</th>
+              <th title="Só preenchido no modo Trailing stop puro">Stop atual</th>
               <th>Vender</th>
             </tr>
           </thead>

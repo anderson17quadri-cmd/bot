@@ -497,6 +497,32 @@ el("btn-resetar-confirmar").addEventListener("click", async () => {
   atualizarTudo();
 });
 
+// --- Modo de SAIDA de uma posicao (take-profit parcial vs trailing puro) ---
+// Sem CONFIRMO: nao muda o risco de compra, so COMO se sai de uma posicao
+// ja aberta, e o stop-loss normal continua ativo em paralelo nos 2 modos.
+async function atualizarModoSaida() {
+  const dados = await (await fetch("/api/modo_saida")).json();
+  // Nao pisa o valor enquanto o utilizador tem o select aberto/focado
+  if (document.activeElement !== el("select-modo-saida")) {
+    el("select-modo-saida").value = dados.modo_saida;
+  }
+  el("explicacao-modo-saida").textContent = dados.modo_saida === "trailing_puro"
+    ? `Nunca vende parcialmente: só vende 100% quando o preço cair ${dados.trailing_puro_pct}% do pico mais alto já atingido. O stop-loss normal (${dados.stop_loss_pct}% desde o preço de compra) continua ativo em paralelo, para quando o preço nunca chega a subir.`
+    : `Ao atingir ${dados.take_profit_multiplicador}x o preço de compra, vende ${dados.take_profit_vender_pct}% e ativa um trailing stop de ${dados.trailing_stop_pct}% sobre o resto. O stop-loss normal (${dados.stop_loss_pct}%) continua ativo em paralelo.`;
+}
+
+el("select-modo-saida").addEventListener("change", async (evento) => {
+  const modo = evento.target.value;
+  const r = await pedirAcao("/api/modo_saida", { modo_saida: modo });
+  if (r.ok) {
+    const nome = modo === "trailing_puro" ? "Trailing stop puro" : "Take-profit parcial";
+    toast(`Modo de saída alterado para ${nome}` + (r.precisa_reiniciar ? " — reinicia o bot para aplicar." : "."), "sucesso");
+  } else {
+    toast(r.erro || "Não foi possível mudar o modo de saída.", "erro");
+  }
+  atualizarModoSaida();
+});
+
 // --- Toggle da bonding curve (experimental, com confirmacao CONFIRMO) ---
 async function atualizarCurva() {
   const dados = await (await fetch("/api/pumpfun")).json();
@@ -1118,6 +1144,7 @@ async function atualizarPosicoes() {
       <td>${tempoDecorrido(p.timestamp_compra)}</td>
       <td class="${classeFlashValor}">${p.valor_atual_usd === null ? "N/A" : dinheiro(p.valor_atual_usd)}</td>
       ${celulaPL}
+      <td>${p.nivel_stop_trailing_usd === null || p.nivel_stop_trailing_usd === undefined ? "–" : precoUnitario(p.nivel_stop_trailing_usd)}</td>
       <td class="acoes-posicao">
         <button class="btn btn-mini btn-perigo" data-vender="50" data-mint="${escHtml(p.mint)}" data-simbolo="${escHtml(p.simbolo)}">50%</button>
         <button class="btn btn-mini btn-perigo" data-vender="100" data-mint="${escHtml(p.mint)}" data-simbolo="${escHtml(p.simbolo)}">100%</button>
@@ -1313,6 +1340,7 @@ async function atualizarTudo() {
       atualizarSniper(),
       atualizarCopy(),
       atualizarEstatisticas(),
+      atualizarModoSaida(),
     ]);
     el("ultima-atualizacao").textContent =
       "Atualizado às " + new Date().toLocaleTimeString("pt-PT");

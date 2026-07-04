@@ -316,6 +316,20 @@ STOP_LOSS_PCT = _env_float("STOP_LOSS_PCT", 20.0)
 TAKE_PROFIT_MULTIPLICADOR = _env_float("TAKE_PROFIT_MULTIPLICADOR", 2.0)
 TAKE_PROFIT_VENDER_PCT = _env_float("TAKE_PROFIT_VENDER_PCT", 50.0)
 TRAILING_STOP_PCT = _env_float("TRAILING_STOP_PCT", 15.0)
+
+# --- Modo de saida: como sair de uma posicao que ESTA a subir -----------
+# "take_profit_parcial" (default, comportamento original): ao atingir
+#   TAKE_PROFIT_MULTIPLICADOR, vende TAKE_PROFIT_VENDER_PCT% e so depois
+#   ativa o TRAILING_STOP_PCT para o resto.
+# "trailing_puro": NUNCA vende parcialmente. So vende 100% quando o preco
+#   cair TRAILING_PURO_PCT% do pico mais alto ja atingido (ignora
+#   TAKE_PROFIT_MULTIPLICADOR/VENDER_PCT neste modo). Deixa o lucro
+#   "correr" enquanto o preco continuar a subir, so sai na reversao.
+# Em AMBOS os modos, o STOP_LOSS_PCT normal (desde o preco de COMPRA)
+# continua ativo em paralelo, como rede de seguranca se o preco nunca
+# chegar a subir.
+MODO_SAIDA = _env_texto("MODO_SAIDA", "take_profit_parcial")
+TRAILING_PURO_PCT = _env_float("TRAILING_PURO_PCT", 30.0)
 SLIPPAGE_BPS = _env_int("SLIPPAGE_BPS", 500)
 FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
 INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)

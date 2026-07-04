@@ -777,45 +777,72 @@ def verificar_posicoes() -> None:
                         alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
                     continue
 
-        # --- TAKE-PROFIT (so dispara uma vez) ---
-        multiplicador_atual = preco_atual / preco_compra
-        if (
-            not pos.get("take_profit_disparado")
-            and multiplicador_atual >= config.TAKE_PROFIT_MULTIPLICADOR
-        ):
-            alerts.info(
-                f"[green]TAKE-PROFIT disparado em {pos['simbolo']} "
-                f"({multiplicador_atual:.2f}x). A vender "
-                f"{config.TAKE_PROFIT_VENDER_PCT}%...[/green]"
-            )
-            try:
-                r = _vender_posicao(mint, chain, config.TAKE_PROFIT_VENDER_PCT)
-                alerts.info(f"[green]{r['mensagem']}[/green]")
-                posicoes.atualizar_posicao(mint, take_profit_disparado=True)
-                if r.get("sucesso"):
-                    lucro_est = pos["valor_investido_usd"] * (config.TAKE_PROFIT_VENDER_PCT / 100) * (variacao_pct / 100)
-                    _notificar_venda_telegram(f"🟢 TAKE-PROFIT: {r['mensagem']}", lucro_est)
-            except Exception as e:
-                alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
-            continue
-
-        # --- TRAILING STOP (so depois do take-profit ja ter disparado) ---
-        if pos.get("take_profit_disparado") and pico > 0:
-            queda_desde_pico_pct = (pico - preco_atual) / pico * 100
-            if queda_desde_pico_pct >= config.TRAILING_STOP_PCT:
+        # --- MODO DE SAIDA: "take_profit_parcial" (default) ou "trailing_puro" ---
+        # O STOP_LOSS_PCT normal (desde o preco de COMPRA, ja tratado acima)
+        # continua ativo em AMBOS os modos, como rede de seguranca para
+        # quando o preco nunca chega a subir. A diferenca esta so em COMO
+        # se sai de uma posicao que ESTA a subir.
+        if config.MODO_SAIDA == "trailing_puro":
+            # --- TRAILING PURO: nunca vende parcialmente. So vende 100%
+            # quando o preco cai TRAILING_PURO_PCT% do pico mais alto ja
+            # atingido. Ignora TAKE_PROFIT_MULTIPLICADOR/VENDER_PCT. ---
+            if pico > 0:
+                queda_desde_pico_pct = (pico - preco_atual) / pico * 100
+                if queda_desde_pico_pct >= config.TRAILING_PURO_PCT:
+                    alerts.info(
+                        f"[yellow]TRAILING PURO disparado em {pos['simbolo']} "
+                        f"(caiu {queda_desde_pico_pct:.1f}% do pico de ${pico:.6g}). "
+                        f"A vender tudo...[/yellow]"
+                    )
+                    try:
+                        r = _vender_posicao(mint, chain, 100)
+                        alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
+                        if r.get("sucesso"):
+                            lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
+                            _notificar_venda_telegram(f"🟡 TRAILING PURO: {r['mensagem']}", lucro_est)
+                    except Exception as e:
+                        alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
+        else:
+            # --- TAKE-PROFIT PARCIAL (comportamento original, default) ---
+            # --- TAKE-PROFIT (so dispara uma vez) ---
+            multiplicador_atual = preco_atual / preco_compra
+            if (
+                not pos.get("take_profit_disparado")
+                and multiplicador_atual >= config.TAKE_PROFIT_MULTIPLICADOR
+            ):
                 alerts.info(
-                    f"[yellow]TRAILING STOP disparado em {pos['simbolo']} "
-                    f"(caiu {queda_desde_pico_pct:.1f}% do pico). "
-                    f"A vender o resto...[/yellow]"
+                    f"[green]TAKE-PROFIT disparado em {pos['simbolo']} "
+                    f"({multiplicador_atual:.2f}x). A vender "
+                    f"{config.TAKE_PROFIT_VENDER_PCT}%...[/green]"
                 )
                 try:
-                    r = _vender_posicao(mint, chain, 100)
-                    alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
+                    r = _vender_posicao(mint, chain, config.TAKE_PROFIT_VENDER_PCT)
+                    alerts.info(f"[green]{r['mensagem']}[/green]")
+                    posicoes.atualizar_posicao(mint, take_profit_disparado=True)
                     if r.get("sucesso"):
-                        lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
-                        _notificar_venda_telegram(f"🟡 TRAILING STOP: {r['mensagem']}", lucro_est)
+                        lucro_est = pos["valor_investido_usd"] * (config.TAKE_PROFIT_VENDER_PCT / 100) * (variacao_pct / 100)
+                        _notificar_venda_telegram(f"🟢 TAKE-PROFIT: {r['mensagem']}", lucro_est)
                 except Exception as e:
                     alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
+                continue
+
+            # --- TRAILING STOP (so depois do take-profit ja ter disparado) ---
+            if pos.get("take_profit_disparado") and pico > 0:
+                queda_desde_pico_pct = (pico - preco_atual) / pico * 100
+                if queda_desde_pico_pct >= config.TRAILING_STOP_PCT:
+                    alerts.info(
+                        f"[yellow]TRAILING STOP disparado em {pos['simbolo']} "
+                        f"(caiu {queda_desde_pico_pct:.1f}% do pico). "
+                        f"A vender o resto...[/yellow]"
+                    )
+                    try:
+                        r = _vender_posicao(mint, chain, 100)
+                        alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
+                        if r.get("sucesso"):
+                            lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
+                            _notificar_venda_telegram(f"🟡 TRAILING STOP: {r['mensagem']}", lucro_est)
+                    except Exception as e:
+                        alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
 
 
 def reavaliar_watchlist() -> None:

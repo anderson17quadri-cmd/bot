@@ -621,6 +621,22 @@ tr:last-child td { border-bottom: none; }
 .estado-liq.viva  { color: var(--verde); }
 .estado-liq.morta { color: var(--vermelho); }
 
+/* Modo de saida das posicoes (take-profit parcial vs trailing puro) */
+.config-modo-saida {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.config-modo-saida label { font-size: 0.78rem; color: var(--texto-suave); font-weight: 600; }
+.explicacao-modo-saida {
+  flex-basis: 100%;
+  font-size: 0.72rem;
+  color: var(--texto-mudo);
+  margin: 0;
+}
+
 /* Filtros da tabela de historico */
 .filtros-hist { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .campo-filtro {
