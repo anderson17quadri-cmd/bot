@@ -272,6 +272,11 @@ def comprar_na_curva(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: f
     except ErroCurva as e:
         return {"sucesso": False, "dry_run": config.DRY_RUN, "mensagem": f"[curva] {e}"}
 
+    # Endereco da propria bonding curve - guardado na posicao para a
+    # deteccao de reversao (momentum.py) poder excluir esta conta das
+    # contagens de compra/venda (senao o racio ficava sempre ~1:1)
+    bonding_curve_str = str(_pda_bonding_curve(Pubkey.from_string(mint)))
+
     if estado["complete"]:
         return {"sucesso": False, "dry_run": config.DRY_RUN,
                 "mensagem": "Token ja graduou - usa a compra normal (Jupiter), nao a curva."}
@@ -305,7 +310,7 @@ def comprar_na_curva(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: f
             mint=mint, simbolo=simbolo, valor_investido_usd=teto,
             preco_compra_usd=preco_unit_usd, quantidade_tokens=tokens, dry_run=True,
             decimais=6,  # tokens do pump.fun sao sempre de 6 decimais
-            dex="pump-fun", modo="bonding_curve",
+            dex="pump-fun", modo="bonding_curve", pool_address=bonding_curve_str,
         )
         # Marca a posicao como sendo de bonding curve (tag no dashboard)
         posicoes.atualizar_posicao(mint, origem="bonding_curve")
@@ -387,7 +392,8 @@ def _comprar_real(mint_str, simbolo, valor_usd, valor_sol, tokens_esperados,
         posicoes.abrir_posicao(mint=mint_str, simbolo=simbolo, valor_investido_usd=valor_usd,
                                preco_compra_usd=preco_unit_usd, quantidade_tokens=tokens_esperados,
                                dry_run=False, decimais=6,  # pump.fun = 6 decimais
-                               dex="pump-fun", modo="bonding_curve")
+                               dex="pump-fun", modo="bonding_curve",
+                               pool_address=str(_pda_bonding_curve(mint)))
         posicoes.atualizar_posicao(mint_str, origem="bonding_curve")
         return {"sucesso": True, "dry_run": False, "origem": "bonding_curve",
                 "assinatura": assinatura,

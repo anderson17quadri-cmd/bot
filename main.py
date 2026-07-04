@@ -348,7 +348,8 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
         r = executor.comprar_token(mint=mint, simbolo=simbolo,
                                    valor_usd=valor, preco_sol_usd=preco_sol_usd,
                                    decimais=dados.get("decimais"),
-                                   dex=dados.get("dex"), modo="sniper_rapido")
+                                   dex=dados.get("dex"), modo="sniper_rapido",
+                                   pool_address=dados.get("pool_address"))
         if r.get("sucesso"):
             posicoes.atualizar_posicao(mint, sniper_rapido=True)
             if config.DRY_RUN:
@@ -564,6 +565,7 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
             valor_usd=config.MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
             decimais=dados.get("decimais"),
             dex=dados.get("dex"), modo="normal",
+            pool_address=dados.get("pool_address"),
         )
         etiqueta = "[SIMULADO]" if resultado["dry_run"] else "[REAL]"
         alerts.info(f"[green]{etiqueta} COMPRA: {resultado['mensagem']}[/green]")
@@ -640,6 +642,33 @@ def verificar_posicoes() -> None:
             except Exception as e:
                 alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
             continue
+
+        # --- DETECAO DE REVERSAO (saida antecipada, opcional) ---
+        # So Solana (momentum.py fala com o RPC da Solana); so corre se
+        # ligado explicitamente - custa chamadas RPC extra POR POSICAO
+        # ABERTA a cada verificacao (INTERVALO_VERIFICAR_POSICOES), por
+        # isso fica desligado por defeito. Reutiliza a mesma tecnica do
+        # filtro de qualidade do Caveira (momentum.py), mas aplicada a uma
+        # posicao JA aberta em vez de a um candidato de compra.
+        if config.DETECAO_REVERSAO_ATIVA and chain == "solana":
+            excluir = {pos["pool_address"]} if pos.get("pool_address") else set()
+            m = momentum.analisar_momentum(mint, excluir=excluir)
+            if m["disponivel"] and m["vendas"] >= config.REVERSAO_VENDAS_MIN:
+                # compras=0 com vendas suficientes = reversao maxima (so
+                # gente a sair, ninguem a entrar) - racio "infinito", dispara
+                ratio_venda = (m["vendas"] / m["compras"]) if m["compras"] > 0 else float("inf")
+                if ratio_venda >= config.REVERSAO_RATIO_VENDA_MIN:
+                    alerts.info(
+                        f"[yellow]REVERSAO DE VOLUME em {pos['simbolo']} "
+                        f"({m['vendas']} vendas vs {m['compras']} compras recentes) - "
+                        f"a vender mais cedo, sem esperar pelo take-profit normal...[/yellow]"
+                    )
+                    try:
+                        r = _vender_posicao(mint, chain, 100)
+                        alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
+                    except Exception as e:
+                        alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
+                    continue
 
         # --- TAKE-PROFIT (so dispara uma vez) ---
         multiplicador_atual = preco_atual / preco_compra

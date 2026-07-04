@@ -287,6 +287,23 @@ SLIPPAGE_BPS = _env_int("SLIPPAGE_BPS", 500)
 FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
 INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)
 
+# --- Deteccao de reversao (saida antecipada por volume de venda) ------
+# Alem do stop-loss/take-profit/trailing normais, deteta se o VOLUME DE
+# VENDAS de uma posicao aberta comecar a superar claramente o de compras
+# (reutiliza momentum.py, a mesma tecnica do filtro de qualidade do
+# Caveira) - sinal de que outros estao a sair, mesmo antes do preco cair
+# o suficiente para disparar o stop-loss. DESLIGADO por defeito: e um
+# sinal HEURISTICO extra, nao substitui as regras normais, e custa
+# chamadas RPC extra por posicao aberta a cada verificacao.
+DETECAO_REVERSAO_ATIVA = _env_texto("DETECAO_REVERSAO_ATIVA", "false").lower() in ("1", "true", "yes", "sim")
+# Vendas >= este racio x compras dispara a saida antecipada (ex: 2.0 =
+# pelo menos o dobro de vendas que compras nas transacoes recentes)
+REVERSAO_RATIO_VENDA_MIN = _env_float("REVERSAO_RATIO_VENDA_MIN", 2.0)
+# Minimo de vendas observadas antes de confiar no racio (evita disparar
+# com 1 venda vs 0 compras, que tecnicamente e um racio "infinito" mas
+# nao e informacao suficiente)
+REVERSAO_VENDAS_MIN = _env_int("REVERSAO_VENDAS_MIN", 3)
+
 
 # ==========================================================================
 # 7b) BONDING CURVE do pump.fun (Parte C) - EXPERIMENTAL e ARRISCADO

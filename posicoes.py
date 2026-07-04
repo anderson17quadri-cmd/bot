@@ -40,6 +40,7 @@ def abrir_posicao(
     decimais: int | None = None,
     dex: str | None = None,
     modo: str = "normal",
+    pool_address: str | None = None,
 ) -> dict:
     # 'decimais' e opcional (posicoes antigas nao o tem): serve so para o
     # dashboard poder converter o preco por UNIDADE MINIMA (raw, que e
@@ -61,6 +62,12 @@ def abrir_posicao(
         "decimais": decimais,
         "dex": dex,
         "modo": modo,
+        # Conta do pool/bonding curve (se soubermos) - usada pela deteccao
+        # de reversao (momentum.py) para EXCLUIR o pool das contagens de
+        # compra/venda. Sem isto, toda compra soma 1 "venda" do lado do
+        # pool (o pool perde saldo quando alguem compra) e vice-versa -
+        # o racio ficaria sempre ~1:1 por construcao, inutil como sinal.
+        "pool_address": pool_address,
         "pico_preco_usd": preco_compra_usd,
         "take_profit_disparado": False,
         "timestamp_compra": datetime.now(timezone.utc).isoformat(),

@@ -194,7 +194,7 @@ def _executar_swap_real(cotacao: dict) -> str:
 
 def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float,
                   decimais: int | None = None, dex: str | None = None,
-                  modo: str = "normal") -> dict:
+                  modo: str = "normal", pool_address: str | None = None) -> dict:
     """Compra 'valor_usd' dolares do token 'mint', pagando em SOL.
 
     'preco_sol_usd' e o preco atual do SOL em USD, usado so para converter
@@ -235,7 +235,7 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
             mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
             preco_compra_usd=preco_compra_estimado,
             quantidade_tokens=quantidade_tokens_estimada, dry_run=True,
-            decimais=decimais, dex=dex, modo=modo,
+            decimais=decimais, dex=dex, modo=modo, pool_address=pool_address,
         )
         return {
             "sucesso": True, "dry_run": True,
