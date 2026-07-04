@@ -15,6 +15,7 @@ Junta todas as pecas e corre o ciclo principal:
 Correr:  python main.py     (Ctrl+C para parar)
 """
 
+import sys
 import time
 
 import config
@@ -707,9 +708,31 @@ def main() -> None:
         alerts.console.print(f"\n[bold]Fase 2 ativa - modo: {modo}[/bold]")
         if not config.DRY_RUN:
             import wallet
-            if not wallet.confirmar_wallet_dedicada():
-                alerts.console.print("[red]Confirmacao nao recebida. A sair.[/red]")
-                return
+            # A confirmacao interativa (input()) so faz sentido num terminal.
+            # Arrancado pelo dashboard (subprocess sem TTY), o input() rebentava
+            # com EOFError e o bot MORRIA logo no arranque - ou seja, o modo
+            # REAL nem sequer arrancava pelo botao. Nesse caso (headless), a
+            # troca para REAL ja exigiu CONFIRMO no dashboard; aqui so avisamos
+            # qual wallet vai ser usada, em vez de pedir input que ninguem le.
+            tem_terminal = bool(getattr(sys.stdin, "isatty", None) and sys.stdin.isatty())
+            if tem_terminal:
+                if not wallet.confirmar_wallet_dedicada():
+                    alerts.console.print("[red]Confirmacao nao recebida. A sair.[/red]")
+                    return
+            else:
+                try:
+                    endereco = wallet.endereco_publico()
+                    saldo = wallet.obter_saldo_sol()
+                    alerts.console.print(
+                        f"[yellow]MODO REAL (headless): wallet {endereco} "
+                        f"({saldo:.4f} SOL). Confirma que e a wallet DEDICADA ao "
+                        f"bot - a troca para REAL ja foi confirmada no dashboard.[/yellow]"
+                    )
+                except Exception as e:
+                    alerts.console.print(
+                        f"[red]MODO REAL mas a wallet e invalida/indisponivel ({e}). A sair.[/red]"
+                    )
+                    return
     else:
         alerts.console.print(
             "\n[dim]Fase 2 desligada (sem WALLET_PRIVATE_KEY). "
