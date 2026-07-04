@@ -30,6 +30,7 @@ import radar
 import watchlist
 import cooldown
 import momentum
+import telegram_alerts
 
 
 def avaliar_com_ia(dados: dict) -> dict:
@@ -77,6 +78,41 @@ def avaliar_com_ia(dados: dict) -> dict:
             alerts.info(f"[yellow]Camada 2 falhou, mantenho Camada 1:[/yellow] {e}")
 
     return resultado
+
+
+def _notificar_compra_telegram(mensagem: str) -> None:
+    """Notifica o Telegram de uma compra bem-sucedida (qualquer um dos 4
+    modos). No-op se o Telegram nao estiver configurado. Nunca levanta
+    excecao - uma notificacao falhada nunca deve travar o bot."""
+    try:
+        telegram_alerts.enviar(f"✅ COMPRA: {mensagem}")
+    except Exception:
+        pass
+
+
+def _notificar_venda_telegram(mensagem: str, lucro_estimado_usd: float | None = None) -> None:
+    """Notifica o Telegram de uma venda bem-sucedida, com o lucro/prejuizo
+    ESTIMADO (a partir da variacao de preco - nao e o valor exato do
+    ledger, so serve para a notificacao ser informativa sem custar uma
+    leitura extra do carteira.json). Se a venda representar uma fatia
+    grande do saldo atual (TELEGRAM_ALERTA_SALDO_PCT), acrescenta um aviso
+    destacado de 'mudanca significativa'. Nunca levanta excecao."""
+    try:
+        texto = f"💰 VENDA: {mensagem}"
+        if lucro_estimado_usd is not None:
+            emoji = "📈" if lucro_estimado_usd >= 0 else "📉"
+            texto += f"\n{emoji} Lucro/prejuízo estimado: ${lucro_estimado_usd:+.2f}"
+            try:
+                import carteira
+                saldo = carteira.saldo_disponivel()
+                if saldo > 0 and (abs(lucro_estimado_usd) / saldo * 100) >= config.TELEGRAM_ALERTA_SALDO_PCT:
+                    pct = abs(lucro_estimado_usd) / saldo * 100
+                    texto += f"\n⚠️ Mudança significativa: {pct:.1f}% do saldo atual!"
+            except Exception:
+                pass
+        telegram_alerts.enviar(texto)
+    except Exception:
+        pass
 
 
 # Cache do preco do SOL: o preco quase nao mexe em poucos segundos, mas
@@ -167,6 +203,8 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
         )
         cor = "green" if r.get("sucesso") else "yellow"
         alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
+        if r.get("sucesso"):
+            _notificar_compra_telegram(r["mensagem"])
     except Exception as e:
         alerts.info(f"[red]Falha na compra na curva de {simbolo}:[/red] {e}")
     return True  # tratado pelo caminho da curva, nao cai no fluxo normal
@@ -360,6 +398,7 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
                 f"[bold magenta]💀 [SNIPER RAPIDO] {r['mensagem']} "
                 f"(passou a checklist binaria, SEM esperar pela IA)[/bold magenta]"
             )
+            _notificar_compra_telegram(f"💀 [SNIPER] {r['mensagem']}")
             return True
         alerts.info(f"[yellow]💀 [sniper] falha ao comprar {simbolo}: {r.get('mensagem')}[/yellow]")
     except Exception as e:
@@ -463,6 +502,7 @@ def tentar_copy_trade(sinal: dict) -> None:
                 f"[bold cyan][COPY] {r['mensagem']} "
                 f"(copiou {carteira_seguida[:8]}...)[/bold cyan]"
             )
+            _notificar_compra_telegram(f"👥 [COPY de {carteira_seguida[:8]}...] {r['mensagem']}")
             return
         alerts.info(f"[yellow][COPY] falha ao comprar {mint[:8]}...: {r.get('mensagem')}[/yellow]")
     except Exception as e:
@@ -502,6 +542,8 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
                                        dex=dados.get("dex"))
         cor = "green" if r.get("sucesso") else "yellow"
         alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
+        if r.get("sucesso"):
+            _notificar_compra_telegram(r["mensagem"])
     except Exception as e:
         alerts.info(f"[red]Falha na compra BSC de {simbolo}:[/red] {e}")
 
@@ -569,6 +611,8 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
         )
         etiqueta = "[SIMULADO]" if resultado["dry_run"] else "[REAL]"
         alerts.info(f"[green]{etiqueta} COMPRA: {resultado['mensagem']}[/green]")
+        if resultado.get("sucesso"):
+            _notificar_compra_telegram(resultado["mensagem"])
     except Exception as e:
         alerts.info(f"[red]Falha na compra de {simbolo}:[/red] {e}")
 
@@ -639,6 +683,9 @@ def verificar_posicoes() -> None:
             try:
                 r = _vender_posicao(mint, chain, 100)
                 alerts.info(f"[red]{r['mensagem']}[/red]")
+                if r.get("sucesso"):
+                    lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
+                    _notificar_venda_telegram(f"🔴 STOP-LOSS: {r['mensagem']}", lucro_est)
             except Exception as e:
                 alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
             continue
@@ -666,6 +713,9 @@ def verificar_posicoes() -> None:
                     try:
                         r = _vender_posicao(mint, chain, 100)
                         alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
+                        if r.get("sucesso"):
+                            lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
+                            _notificar_venda_telegram(f"🔃 REVERSÃO DE VOLUME: {r['mensagem']}", lucro_est)
                     except Exception as e:
                         alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
                     continue
@@ -685,6 +735,9 @@ def verificar_posicoes() -> None:
                 r = _vender_posicao(mint, chain, config.TAKE_PROFIT_VENDER_PCT)
                 alerts.info(f"[green]{r['mensagem']}[/green]")
                 posicoes.atualizar_posicao(mint, take_profit_disparado=True)
+                if r.get("sucesso"):
+                    lucro_est = pos["valor_investido_usd"] * (config.TAKE_PROFIT_VENDER_PCT / 100) * (variacao_pct / 100)
+                    _notificar_venda_telegram(f"🟢 TAKE-PROFIT: {r['mensagem']}", lucro_est)
             except Exception as e:
                 alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
             continue
@@ -701,6 +754,9 @@ def verificar_posicoes() -> None:
                 try:
                     r = _vender_posicao(mint, chain, 100)
                     alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
+                    if r.get("sucesso"):
+                        lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
+                        _notificar_venda_telegram(f"🟡 TRAILING STOP: {r['mensagem']}", lucro_est)
                 except Exception as e:
                     alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
 
@@ -972,7 +1028,15 @@ def main() -> None:
                 try:
                     processar_pool(pool)
                 except Exception as e:
+                    # Erro GRAVE: nao previsto (as falhas de rede rotineiras
+                    # ja sao apanhadas dentro de processar_pool). Notifica -
+                    # e o tipo de coisa que vale a pena saber sem estar a
+                    # olhar para a consola.
                     alerts.info(f"[red]Erro a processar {pool.get('token_simbolo','?')}:[/red] {e}")
+                    try:
+                        telegram_alerts.enviar(f"🚨 ERRO ao processar {pool.get('token_simbolo','?')}: {e}")
+                    except Exception:
+                        pass
                 time.sleep(config.PAUSA_ENTRE_TOKENS)
 
         # Verifica posicoes abertas periodicamente (independente de haver
@@ -988,7 +1052,13 @@ def main() -> None:
             try:
                 verificar_posicoes()
             except Exception as e:
+                # Erro GRAVE: verificar_posicoes ja apanha falhas de cotacao
+                # por posicao individualmente - chegar aqui e algo inesperado.
                 alerts.info(f"[red]Erro a verificar posicoes:[/red] {e}")
+                try:
+                    telegram_alerts.enviar(f"🚨 ERRO grave a verificar posicoes: {e}")
+                except Exception:
+                    pass
             # A watchlist faz chamadas por token (com pausas) - so a
             # reavaliamos na cadencia normal, nunca no gatilho reativo, para
             # nao martelar as APIs sempre que uma compra abre posicao.

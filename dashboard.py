@@ -860,6 +860,11 @@ def api_comprar():
 
     if resultado.get("sucesso"):
         watchlist.remover(mint)  # comprado -> sai da watchlist (passa a posicao)
+        try:
+            import telegram_alerts
+            telegram_alerts.enviar(f"✅ COMPRA (manual): {resultado.get('mensagem', '')}")
+        except Exception:
+            pass
     return jsonify({"ok": bool(resultado.get("sucesso")),
                     "mensagem": resultado.get("mensagem", ""),
                     "dry_run": resultado.get("dry_run")})
@@ -900,6 +905,12 @@ def api_vender():
     except Exception as e:
         return jsonify({"ok": False, "erro": f"Falha na venda: {e}"}), 500
 
+    if resultado.get("sucesso"):
+        try:
+            import telegram_alerts
+            telegram_alerts.enviar(f"💰 VENDA (manual, {percentagem:.0f}%): {resultado.get('mensagem', '')}")
+        except Exception:
+            pass
     return jsonify({"ok": bool(resultado.get("sucesso")),
                     "mensagem": resultado.get("mensagem", ""),
                     "dry_run": resultado.get("dry_run")})

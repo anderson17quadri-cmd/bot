@@ -134,6 +134,19 @@ JITO_BLOCK_ENGINE_URL = _env_texto(
 # lamports (~0.0001 SOL) e um ponto de partida razoavel.
 JITO_TIP_LAMPORTS = _env_int("JITO_TIP_LAMPORTS", 100_000)
 
+# --- Alertas Telegram (opcional) ---------------------------------------
+# Notificacoes de compra/venda/erro grave/mudanca de saldo via Telegram
+# Bot API (gratuita). Ver telegram_alerts.py para o guia de configuracao.
+# Sem token/chat_id ou com o toggle desligado, o bot funciona na mesma -
+# so nao envia notificacoes (nunca bloqueia por falta disto).
+TELEGRAM_ALERTAS_ATIVO = _env_texto("TELEGRAM_ALERTAS_ATIVO", "false").lower() in ("1", "true", "yes", "sim")
+TELEGRAM_BOT_TOKEN = _env_texto("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = _env_texto("TELEGRAM_CHAT_ID", "")
+# Uma venda cujo lucro/prejuizo represente >= esta % do saldo atual dispara
+# um aviso EXTRA destacado (mudanca "significativa"), alem da notificacao
+# normal de venda.
+TELEGRAM_ALERTA_SALDO_PCT = _env_float("TELEGRAM_ALERTA_SALDO_PCT", 10.0)
+
 # --- Copy Trading (seguir carteiras "top") -----------------------------
 # Segue uma lista MANUAL de carteiras; quando uma delas COMPRA um token, o
 # bot replica (valor pequeno e fixo) apos uma verificacao minima. E um 4o
