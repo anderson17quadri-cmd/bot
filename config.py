@@ -337,6 +337,15 @@ REVERSAO_RATIO_VENDA_MIN = _env_float("REVERSAO_RATIO_VENDA_MIN", 2.0)
 # nao e informacao suficiente)
 REVERSAO_VENDAS_MIN = _env_int("REVERSAO_VENDAS_MIN", 3)
 
+# --- Venda automatica por TEMPO sem valorizacao -------------------------
+# Independente do stop-loss/take-profit/trailing: se uma posicao estiver
+# aberta ha mais de TEMPO_MAXIMO_SEM_LUCRO_HORAS e o preco atual NAO
+# estiver acima do preco de compra (sem lucro nenhum, nem pequeno), vende
+# 100% - nao deixa dinheiro parado indefinidamente num token que nao vai
+# a lado nenhum. Aplica-se a TODOS os modos de compra. Poe um valor muito
+# alto (ex: 999999) para desativar.
+TEMPO_MAXIMO_SEM_LUCRO_HORAS = _env_float("TEMPO_MAXIMO_SEM_LUCRO_HORAS", 2.0)
+
 
 # ==========================================================================
 # 7b) BONDING CURVE do pump.fun (Parte C) - EXPERIMENTAL e ARRISCADO

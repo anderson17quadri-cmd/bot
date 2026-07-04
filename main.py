@@ -17,6 +17,7 @@ Correr:  python main.py     (Ctrl+C para parar)
 
 import sys
 import time
+from datetime import datetime, timezone
 
 import config
 import detector
@@ -715,6 +716,36 @@ def verificar_posicoes() -> None:
             except Exception as e:
                 alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
             continue
+
+        # --- VENDA POR TEMPO SEM VALORIZACAO ---
+        # Independente do stop-loss/take-profit: nao deixa dinheiro parado
+        # indefinidamente num token que nao esta a ir a lado nenhum. So
+        # dispara se o preco NAO estiver acima do preco de compra (sem
+        # lucro nenhum, nem pequeno) - se ja houver lucro, mesmo pequeno,
+        # o take-profit/trailing normais e que decidem. Aplica-se a
+        # TODOS os modos de compra (nao ha isolamento aqui de proposito).
+        timestamp_compra = pos.get("timestamp_compra")
+        if timestamp_compra and variacao_pct <= 0:
+            try:
+                aberta_desde = datetime.fromisoformat(timestamp_compra)
+                horas_aberta = (datetime.now(timezone.utc) - aberta_desde).total_seconds() / 3600
+            except (TypeError, ValueError):
+                horas_aberta = 0
+            if horas_aberta >= config.TEMPO_MAXIMO_SEM_LUCRO_HORAS:
+                alerts.info(
+                    f"[yellow]{pos['simbolo']}: aberta ha {horas_aberta:.1f}h sem lucro "
+                    f"({variacao_pct:+.1f}%) - a vender por TEMPO (>= "
+                    f"{config.TEMPO_MAXIMO_SEM_LUCRO_HORAS}h sem valorizacao)...[/yellow]"
+                )
+                try:
+                    r = _vender_posicao(mint, chain, 100)
+                    alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
+                    if r.get("sucesso"):
+                        lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
+                        _notificar_venda_telegram(f"⏳ VENDA POR TEMPO ({horas_aberta:.1f}h sem lucro): {r['mensagem']}", lucro_est)
+                except Exception as e:
+                    alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
+                continue
 
         # --- DETECAO DE REVERSAO (saida antecipada, opcional) ---
         # So Solana (momentum.py fala com o RPC da Solana); so corre se
