@@ -258,6 +258,15 @@ def camada2_configurada() -> bool:
 DRY_RUN = _env_texto("DRY_RUN", "true").lower() in ("1", "true", "yes", "sim")
 SALDO_VIRTUAL_INICIAL = _env_float("SALDO_VIRTUAL_INICIAL", 200.0)
 WALLET_PRIVATE_KEY = _env_texto("WALLET_PRIVATE_KEY")
+# Trava final do envio real na Solana (Jupiter), simetrica a das outras
+# vias (PUMPFUN_/BSC_PERMITIR_ENVIO_REAL): mesmo com DRY_RUN=false, as
+# compras/vendas normais (Jupiter) so saem on-chain se isto for true.
+# Antes disto, o caminho principal era o UNICO sem 2a trava nem simulacao
+# - agora corre sempre simulateTransaction e so envia se isto estiver on.
+SOLANA_PERMITIR_ENVIO_REAL = _env_texto("SOLANA_PERMITIR_ENVIO_REAL", "false").lower() in ("1", "true", "yes", "sim")
+# Quanto tempo (s) esperar pela confirmacao on-chain de uma tx antes de a
+# dar como "incerta" (nao abre/fecha a posicao sem confirmacao).
+CONFIRMAR_TX_SEGUNDOS = _env_float("CONFIRMAR_TX_SEGUNDOS", 20.0)
 MAX_TRADE_USD = _env_float("MAX_TRADE_USD", 5.0)
 SCORE_COMPRA_MAX = _env_int("SCORE_COMPRA_MAX", 20)
 # Tokens "fronteira": score acima do limiar de compra mas dentro desta
@@ -370,6 +379,7 @@ def resumo() -> str:
         f"Camada 1 DeepSeek : {'ON (' + DEEPSEEK_MODEL + ')' if camada1_configurada() else 'OFF (sem chave -> usa score heuristico)'}",
         f"Camada 2 Claude   : {'ON (' + ANTHROPIC_MODEL + ')' if camada2_configurada() else 'OFF (opcional)'}",
         f"Fase 2 (trading)  : {'ON, DRY_RUN=' + str(DRY_RUN) if fase2_configurada() else 'OFF (sem WALLET_PRIVATE_KEY)'}",
+        f"Envio real Solana : {'PERMITIDO' if SOLANA_PERMITIR_ENVIO_REAL else 'BLOQUEADO (so simula; liga SOLANA_PERMITIR_ENVIO_REAL)'}",
         f"Envio Jito        : {'ON (tip ' + str(JITO_TIP_LAMPORTS) + ' lamports)' if JITO_ATIVO else 'OFF (envio normal pelo RPC)'}",
         f"Copy Trading      : {'ON (' + str(len([w for w in COPY_TRADE_WALLETS.split(',') if w.strip()])) + ' carteira(s))' if COPY_TRADE_ATIVO else 'OFF'}",
     ]

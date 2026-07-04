@@ -67,16 +67,70 @@ def _enviar_via_jito(tx_assinada_base64: str) -> str:
     return resultado["result"]
 
 
+class EnvioRealBloqueado(Exception):
+    """A tx passou a simulacao mas a trava SOLANA_PERMITIR_ENVIO_REAL esta
+    desligada - nada foi enviado (nem gasto)."""
+
+
+class ConfirmacaoIncerta(Exception):
+    """A tx foi enviada mas nao confirmou dentro do tempo limite. Pode ter
+    aterrado ou nao - o estado on-chain e incerto. O arg e a assinatura."""
+
+
+def _simular_transacao(tx_assinada_base64: str) -> None:
+    """Corre simulateTransaction. Levanta RuntimeError se a simulacao
+    devolver erro (a tx reverteria on-chain) - abortamos antes de gastar."""
+    sim = requests.post(config.SOLANA_RPC_URL, json={
+        "jsonrpc": "2.0", "id": 1, "method": "simulateTransaction",
+        "params": [tx_assinada_base64, {"encoding": "base64", "sigVerify": False,
+                                        "replaceRecentBlockhash": True}],
+    }, timeout=20).json()
+    erro = sim.get("result", {}).get("value", {}).get("err")
+    if erro is not None:
+        raise RuntimeError(f"simulacao falhou (nao enviado): {erro}")
+
+
+def _confirmar_assinatura(assinatura: str) -> str:
+    """Espera ate a tx confirmar on-chain. Devolve:
+      "confirmada" -> aterrou com sucesso
+      "falhou"     -> aterrou mas com erro (revertida)
+      "incerto"    -> nao confirmou dentro de CONFIRMAR_TX_SEGUNDOS
+    Nunca levanta - qualquer falha de rede conta para o "incerto"."""
+    fim = time.time() + config.CONFIRMAR_TX_SEGUNDOS
+    while time.time() < fim:
+        try:
+            r = requests.post(config.SOLANA_RPC_URL, json={
+                "jsonrpc": "2.0", "id": 1, "method": "getSignatureStatuses",
+                "params": [[assinatura], {"searchTransactionHistory": True}],
+            }, timeout=10).json()
+            val = (r.get("result", {}).get("value") or [None])[0]
+            if val:
+                if val.get("err") is not None:
+                    return "falhou"
+                if val.get("confirmationStatus") in ("confirmed", "finalized"):
+                    return "confirmada"
+        except Exception:
+            pass
+        time.sleep(2)
+    return "incerto"
+
+
 def _executar_swap_real(cotacao: dict) -> str:
-    """Pede a transacao a Jupiter, assina-a com a wallet do bot, envia-a
-    para a rede, e devolve a assinatura (hash) da transacao.
+    """Pede a transacao a Jupiter, assina-a, SIMULA, e - se a trava
+    SOLANA_PERMITIR_ENVIO_REAL permitir - envia-a e ESPERA a confirmacao.
+    Devolve a assinatura so quando a tx confirmou on-chain.
 
-    So deve ser chamada quando config.DRY_RUN == False.
+    So deve ser chamada quando config.DRY_RUN == False. Levanta:
+      RuntimeError        - simulacao falhou, RPC recusou, ou tx revertida
+      EnvioRealBloqueado  - simulacao OK mas a trava esta off (nada enviado)
+      ConfirmacaoIncerta  - enviada mas nao confirmou a tempo (estado incerto)
 
-    Se config.JITO_ATIVO, pede a Jupiter para injetar uma gorjeta Jito na
-    transacao e envia-a ao block-engine da Jito (mais rapido a entrar na
-    congestao). Senao, mantem o envio normal pelo RPC. O DRY_RUN nunca
-    chega aqui, por isso o modo simulado fica 100% igual."""
+    Simetria: antes, este era o UNICO caminho sem 2a trava nem simulacao
+    (o pump.fun e a BSC ja as tinham). Agora sao iguais.
+
+    Se config.JITO_ATIVO, pede a Jupiter para injetar a gorjeta Jito e
+    envia ao block-engine da Jito. Senao, envio normal pelo RPC. O DRY_RUN
+    nunca chega aqui, por isso o modo simulado fica 100% igual."""
     keypair = wallet.obter_keypair()
 
     usar_jito = config.JITO_ATIVO
@@ -105,26 +159,37 @@ def _executar_swap_real(cotacao: dict) -> str:
     tx_assinada_bytes = bytes(tx_assinada)
     tx_assinada_base64 = base64.b64encode(tx_assinada_bytes).decode("utf-8")
 
+    # 1) SIMULACAO: aborta se a tx reverteria (protege antes de gastar)
+    _simular_transacao(tx_assinada_base64)
+
+    # 2) TRAVA FINAL: simetrica a do pump.fun/BSC. Sem ela, nada e enviado.
+    if not config.SOLANA_PERMITIR_ENVIO_REAL:
+        raise EnvioRealBloqueado("SOLANA_PERMITIR_ENVIO_REAL=false")
+
+    # 3) ENVIO (Jito ou RPC normal)
     if usar_jito:
-        return _enviar_via_jito(tx_assinada_base64)
+        assinatura = _enviar_via_jito(tx_assinada_base64)
+    else:
+        payload_envio = {
+            "jsonrpc": "2.0", "id": 1, "method": "sendTransaction",
+            "params": [tx_assinada_base64,
+                       {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}],
+        }
+        resposta_envio = requests.post(config.SOLANA_RPC_URL, json=payload_envio, timeout=30)
+        resposta_envio.raise_for_status()
+        resultado = resposta_envio.json()
+        if "error" in resultado:
+            raise RuntimeError(f"RPC recusou a transacao: {resultado['error']}")
+        assinatura = resultado["result"]
 
-    payload_envio = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "sendTransaction",
-        "params": [
-            tx_assinada_base64,
-            {"encoding": "base64", "skipPreflight": False, "maxRetries": 3},
-        ],
-    }
-    resposta_envio = requests.post(config.SOLANA_RPC_URL, json=payload_envio, timeout=30)
-    resposta_envio.raise_for_status()
-    resultado = resposta_envio.json()
-
-    if "error" in resultado:
-        raise RuntimeError(f"RPC recusou a transacao: {resultado['error']}")
-
-    return resultado["result"]  # assinatura da transacao
+    # 4) CONFIRMACAO: so devolvemos a assinatura quando a tx aterrou mesmo -
+    # assim a posicao nunca abre/fecha com base numa tx que nao confirmou.
+    estado = _confirmar_assinatura(assinatura)
+    if estado == "falhou":
+        raise RuntimeError(f"tx {assinatura[:12]}... reverteu on-chain")
+    if estado == "incerto":
+        raise ConfirmacaoIncerta(assinatura)
+    return assinatura
 
 
 def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: float,
@@ -173,8 +238,19 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
             "quantidade_tokens": quantidade_tokens_estimada,
         }
 
-    # Modo real - assina e envia de verdade
-    assinatura = _executar_swap_real(cotacao)
+    # Modo real - simula, [talvez] envia, confirma. So abrimos a posicao
+    # se a tx CONFIRMOU on-chain (senao arriscavamos registar uma posicao
+    # que nao existe, ou dar por comprada uma compra que nunca aterrou).
+    try:
+        assinatura = _executar_swap_real(cotacao)
+    except EnvioRealBloqueado:
+        return {"sucesso": False, "dry_run": False,
+                "mensagem": ("Envio real bloqueado (SOLANA_PERMITIR_ENVIO_REAL=false). "
+                             "Simulacao OK, nada foi comprado.")}
+    except ConfirmacaoIncerta as e:
+        return {"sucesso": False, "dry_run": False, "assinatura": str(e),
+                "mensagem": (f"Compra ENVIADA mas nao confirmou a tempo (tx {str(e)[:12]}...). "
+                             f"Verifica on-chain antes de repetir - posicao NAO aberta.")}
     posicoes.abrir_posicao(
         mint=mint, simbolo=simbolo, valor_investido_usd=valor_usd,
         preco_compra_usd=preco_compra_estimado,
@@ -242,7 +318,18 @@ def vender_token(mint: str, percentagem: float) -> dict:
             ),
         }
     else:
-        assinatura = _executar_swap_real(cotacao)
+        # Real: simula, [talvez] envia, confirma. So mexemos na posicao se
+        # a venda CONFIRMOU - bloqueada ou incerta => posicao mantida aberta.
+        try:
+            assinatura = _executar_swap_real(cotacao)
+        except EnvioRealBloqueado:
+            return {"sucesso": False, "dry_run": False,
+                    "mensagem": ("Venda bloqueada (SOLANA_PERMITIR_ENVIO_REAL=false). "
+                                 "Simulacao OK, nada foi vendido. Posicao mantida.")}
+        except ConfirmacaoIncerta as e:
+            return {"sucesso": False, "dry_run": False, "assinatura": str(e),
+                    "mensagem": (f"Venda ENVIADA mas nao confirmou a tempo (tx {str(e)[:12]}...). "
+                                 f"Verifica on-chain - posicao mantida aberta por seguranca.")}
         resultado = {
             "sucesso": True, "dry_run": False, "assinatura": assinatura,
             "mensagem": f"Vendido {percentagem}% de {posicao['simbolo']} - tx {assinatura[:12]}...",
