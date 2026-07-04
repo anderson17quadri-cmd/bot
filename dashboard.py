@@ -19,6 +19,7 @@ e depois abrir http://localhost:5000 no browser.
 
 import json
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -26,11 +27,112 @@ import time
 from datetime import datetime, timezone
 
 import requests
-from flask import Flask, jsonify, render_template, request
+from flask import (Flask, jsonify, redirect, render_template,
+                   render_template_string, request, session, url_for)
 
 import config  # so para ler DRY_RUN, SALDO_VIRTUAL_INICIAL, etc.
 
 app = Flask(__name__)
+
+
+# ==========================================================================
+# Autenticacao (protege as rotas de dinheiro contra acesso na rede)
+# ==========================================================================
+# A chave de sessao assina o cookie de login. Guardamo-la num ficheiro
+# local (.dashboard_secret, no .gitignore) para as sessoes sobreviverem a
+# reinicios do dashboard - senao cada reinicio deslogava toda a gente.
+def _obter_secret_key() -> bytes:
+    caminho = ".dashboard_secret"
+    try:
+        if os.path.exists(caminho):
+            with open(caminho, "rb") as f:
+                dados = f.read().strip()
+                if len(dados) >= 32:
+                    return dados
+        chave = secrets.token_bytes(48)
+        with open(caminho, "wb") as f:
+            f.write(chave)
+        try:
+            os.chmod(caminho, 0o600)  # so o dono le/escreve
+        except OSError:
+            pass
+        return chave
+    except OSError:
+        # Sem disco de escrita -> chave efemera (sessoes nao sobrevivem a
+        # reinicios, mas o login continua a funcionar dentro da sessao)
+        return secrets.token_bytes(48)
+
+
+app.secret_key = _obter_secret_key()
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,   # o cookie nao e acessivel via JS (anti-XSS)
+    SESSION_COOKIE_SAMESITE="Lax",  # nao viaja em pedidos cross-site
+)
+
+
+@app.before_request
+def _exigir_login():
+    """Bloqueia tudo o que nao seja o login/estaticos quando ha password
+    definida. Sem password, o proprio arranque forca 127.0.0.1 (localhost),
+    por isso nao ha nada exposto a proteger e deixamos passar."""
+    if not config.DASHBOARD_PASSWORD:
+        return None  # modo localhost-only: sem barreira de login
+    if request.endpoint == "static" or request.path == "/login":
+        return None  # o form de login e os estaticos ficam acessiveis
+    if session.get("autenticado"):
+        return None
+    # Nao autenticado: API responde 401 (JSON), paginas vao para o login
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "erro": "Sessão expirada ou não autenticada."}), 401
+    return redirect(url_for("login"))
+
+
+_LOGIN_HTML = """<!doctype html><html lang="pt"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar — Dashboard do Bot</title>
+<style>
+  body{background:#0f1216;color:#e6e9ef;font-family:system-ui,sans-serif;
+       display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+  form{background:#171b22;padding:32px;border-radius:14px;width:min(90vw,340px);
+       box-shadow:0 8px 40px rgba(0,0,0,.4)}
+  h1{font-size:1.1rem;margin:0 0 4px}
+  p{color:#8b94a3;font-size:.85rem;margin:0 0 20px}
+  input{width:100%;box-sizing:border-box;padding:12px;border-radius:8px;
+        border:1px solid #2a303a;background:#0f1216;color:#e6e9ef;font-size:1rem}
+  button{width:100%;margin-top:14px;padding:12px;border:0;border-radius:8px;
+         background:#3987e5;color:#fff;font-size:1rem;font-weight:600;cursor:pointer}
+  .erro{color:#ff5c7a;font-size:.85rem;margin-top:12px;text-align:center}
+</style></head><body>
+<form method="post" autocomplete="off">
+  <h1>🔒 Dashboard do Bot</h1>
+  <p>Esta consola controla dinheiro real. Introduz a password.</p>
+  <input type="password" name="password" placeholder="Password" autofocus>
+  <button type="submit">Entrar</button>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+</form></body></html>"""
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Pagina de login. Sem password configurada, nao ha login a fazer."""
+    if not config.DASHBOARD_PASSWORD:
+        return redirect("/")
+    erro = None
+    if request.method == "POST":
+        candidata = request.form.get("password", "")
+        # compare_digest evita distinguir passwords pelo tempo de resposta
+        if secrets.compare_digest(candidata, config.DASHBOARD_PASSWORD):
+            session["autenticado"] = True
+            session.permanent = True
+            return redirect("/")
+        erro = "Password errada."
+    return render_template_string(_LOGIN_HTML, erro=erro)
+
+
+@app.route("/logout", methods=["POST", "GET"])
+def logout():
+    session.clear()
+    return redirect(url_for("login") if config.DASHBOARD_PASSWORD else "/")
 
 # Mesmos endpoints do executor.py - so o /quote, que e uma consulta
 # inofensiva (nunca compra nem vende nada)
@@ -1121,8 +1223,20 @@ def api_resetar():
 if __name__ == "__main__":
     modo = "DRY RUN (simulado)" if config.DRY_RUN else "REAL"
     print(f"Dashboard do bot - modo {modo}")
-    print("Aberto em: http://localhost:5000")
-    # host="0.0.0.0" permite abrir tambem no browser do telemovel
-    # (ex: http://IP-do-dispositivo:5000) se estiverem na mesma rede.
+
+    # SEGURANCA: so escutamos na rede (0.0.0.0, acessivel pelo telemovel)
+    # se houver password definida. Sem password, escutamos SO em localhost
+    # (127.0.0.1) - o dashboard controla dinheiro real e nao pode ficar
+    # aberto a toda a rede sem autenticacao.
+    if config.DASHBOARD_PASSWORD:
+        host = "0.0.0.0"
+        print("Login ATIVO (DASHBOARD_PASSWORD definida).")
+        print("Aberto na rede em: http://<IP-do-dispositivo>:5000")
+    else:
+        host = "127.0.0.1"
+        print("Sem DASHBOARD_PASSWORD -> acesso SO local (127.0.0.1).")
+        print("Para aceder pelo telemovel, define DASHBOARD_PASSWORD no .env.")
+        print("Aberto em: http://localhost:5000")
+
     # debug=False porque isto pode ficar sempre a correr ao lado do bot.
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host=host, port=5000, debug=False)

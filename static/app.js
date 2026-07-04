@@ -28,6 +28,23 @@ const INTERVALO_POLLING_MS = 4000; // pede dados novos a cada 4 segundos
 /** Atalho para document.getElementById - usado em todo o lado */
 function el(id) { return document.getElementById(id); }
 
+/** Escapa uma string para ser inserida com seguranca em HTML (via
+    innerHTML) OU dentro de um atributo. SEGURANCA: os simbolos/nomes dos
+    tokens vem de fontes externas (GeckoTerminal/on-chain) e qualquer um
+    pode criar um token com um nome tipo `<img onerror=...>`. Sem isto,
+    esse nome era interpretado como HTML e executava JS no dashboard (XSS).
+    O radar mostra TODOS os tokens detetados, por isso bastava o bot correr.
+    Nota: ao ler de volta um data-* atributo, o browser desfaz estas
+    entidades automaticamente, por isso dataset.* devolve o valor original. */
+function escHtml(valor) {
+  return String(valor ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 /** Formata um numero como dinheiro: 12.3456 -> "$12.35" */
 function dinheiro(valor) {
   if (valor === null || valor === undefined) return "N/A";
@@ -186,14 +203,16 @@ function tagChain(chain) {
     DexScreener usa /solana/ ou /bsc/ conforme a chain; para pump.fun
     linka a propria pagina. Sem mint -> devolve so o texto. */
 function linkToken(mint, simbolo, dex = "", chain = "solana") {
-  const nome = simbolo || "?";
+  const nome = escHtml(simbolo || "?");  // escapado: simbolo vem de fora (XSS)
   if (!mint) return nome;
   const ePumpFun = (dex || "").toLowerCase().includes("pump");
+  // encodeURIComponent no mint (parte de um URL); escHtml no href final
+  const mintUrl = encodeURIComponent(mint);
   let url;
-  if (ePumpFun) url = `https://pump.fun/${mint}`;
-  else url = `https://dexscreener.com/${chain || "solana"}/${mint}`;
+  if (ePumpFun) url = `https://pump.fun/${mintUrl}`;
+  else url = `https://dexscreener.com/${encodeURIComponent(chain || "solana")}/${mintUrl}`;
   // rel="noopener": impede a pagina aberta de controlar o dashboard
-  return `<a class="link-token" href="${url}" target="_blank" rel="noopener">${nome} ↗</a>`;
+  return `<a class="link-token" href="${escHtml(url)}" target="_blank" rel="noopener">${nome} ↗</a>`;
 }
 
 // ==========================================================================
@@ -796,8 +815,8 @@ async function atualizarTokensCarteira() {
       <td>${linkToken(t.mint, t.simbolo === "?" ? t.mint.slice(0, 4) + "…" : t.simbolo, "", "solana")}</td>
       <td>${qtd}</td>
       <td>${valor}</td>
-      <td><button class="btn btn-mini btn-neutro" data-enviar-mint="${t.mint}"
-                  data-enviar-simbolo="${t.simbolo}" data-enviar-saldo="${t.quantidade}">Enviar</button></td>
+      <td><button class="btn btn-mini btn-neutro" data-enviar-mint="${escHtml(t.mint)}"
+                  data-enviar-simbolo="${escHtml(t.simbolo)}" data-enviar-saldo="${escHtml(t.quantidade)}">Enviar</button></td>
     </tr>`;
   }).join("");
 }
@@ -984,10 +1003,10 @@ async function atualizarPosicoes() {
       <td class="${classeFlashValor}">${p.valor_atual_usd === null ? "N/A" : dinheiro(p.valor_atual_usd)}</td>
       ${celulaPL}
       <td class="acoes-posicao">
-        <button class="btn btn-mini btn-perigo" data-vender="50" data-mint="${p.mint}" data-simbolo="${p.simbolo}">50%</button>
-        <button class="btn btn-mini btn-perigo" data-vender="100" data-mint="${p.mint}" data-simbolo="${p.simbolo}">100%</button>
+        <button class="btn btn-mini btn-perigo" data-vender="50" data-mint="${escHtml(p.mint)}" data-simbolo="${escHtml(p.simbolo)}">50%</button>
+        <button class="btn btn-mini btn-perigo" data-vender="100" data-mint="${escHtml(p.mint)}" data-simbolo="${escHtml(p.simbolo)}">100%</button>
         <button class="btn btn-mini ${auto ? "btn-neutro" : "btn-verde"}"
-                data-auto="${auto ? "0" : "1"}" data-mint="${p.mint}"
+                data-auto="${auto ? "0" : "1"}" data-mint="${escHtml(p.mint)}"
                 title="${auto ? "Desativar acompanhamento automático" : "Reativar acompanhamento automático"}">
           ${auto ? "Desativar auto" : "Reativar auto"}
         </button>
@@ -1025,10 +1044,10 @@ async function atualizarWatchlist() {
       <td>${tempoDecorrido(w.adicionado_em)}</td>
       <td>
         <button class="btn btn-mini ${seguido ? "btn-verde" : "btn-neutro"}"
-                data-seguir="${seguido ? "0" : "1"}" data-mint="${w.mint}">
+                data-seguir="${seguido ? "0" : "1"}" data-mint="${escHtml(w.mint)}">
           ${seguido ? "★ A seguir" : "☆ Seguir"}
         </button>
-        <button class="btn btn-mini btn-verde" data-comprar data-mint="${w.mint}" data-simbolo="${w.simbolo}">Comprar</button>
+        <button class="btn btn-mini btn-verde" data-comprar data-mint="${escHtml(w.mint)}" data-simbolo="${escHtml(w.simbolo)}">Comprar</button>
       </td>
     </tr>`;
   }).join("");
@@ -1058,7 +1077,7 @@ async function atualizarRadar() {
       <td><span class="pastilha ${classeScore}">${r.score}</span></td>
       <td>${dinheiro(r.liquidez_usd)}</td>
       <td>${marketcap(r.fdv_usd)}</td>
-      <td>${r.dex || "?"}</td>
+      <td>${escHtml(r.dex || "?")}</td>
       <td>${tempoDecorrido(r.timestamp)}</td>
     </tr>`;
   }).join("");

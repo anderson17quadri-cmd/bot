@@ -41,6 +41,15 @@ def _env_float(nome: str, defeito: float) -> float:
 # ==========================================================================
 SOLANA_RPC_URL = _env_texto("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 
+# --- Autenticacao do dashboard ----------------------------------------
+# O dashboard controla dinheiro real (compras, vendas, envio de tokens,
+# mudanca para modo REAL). Sem password, NAO deve ficar exposto na rede.
+# Regra de seguranca (aplicada em dashboard.py):
+#   - COM password  -> exige login; pode escutar em 0.0.0.0 (telemovel).
+#   - SEM password  -> escuta SO em 127.0.0.1 (localhost), nunca na rede.
+# Define uma password forte aqui se quiseres aceder pelo telemovel.
+DASHBOARD_PASSWORD = _env_texto("DASHBOARD_PASSWORD", "")
+
 
 # ==========================================================================
 # 2) Camada 1 - DeepSeek
