@@ -1078,13 +1078,40 @@ def main() -> None:
     while True:
         ciclo += 1
 
-        # Junta os novos de TODAS as redes ativas neste ciclo
-        novos = []
+        # Junta os novos de TODAS as redes ativas neste ciclo, agrupados
+        # por rede (mantendo a ordem de deteccao dentro de cada uma)
+        novos_por_rede: dict[str, list] = {}
         for det in detetores:
             try:
-                novos.extend(det.buscar_novos())
+                pools = det.buscar_novos()
+                if pools:
+                    novos_por_rede.setdefault(det.rede, []).extend(pools)
             except Exception as e:
                 alerts.info(f"[red]Erro a detetar pools ({det.rede}):[/red] {e}")
+
+        # Intercala (round-robin) entre redes para dar uma cota justa a
+        # cada uma - sem isto, a Solana (que gera muito mais tokens por
+        # ciclo) ocupava sozinha todas as vagas de MAX_ANALISES_POR_CICLO
+        # e a BSC nunca chegava a ser processada, mesmo com REDES_ATIVAS
+        # a incluir as duas. Se uma rede esgotar a fila mais cedo, a sua
+        # cota "sobra" naturalmente para a(s) outra(s).
+        #
+        # Quando o total de vagas e impar, a rede que comeca a rodada leva
+        # sempre a vaga extra - por isso alternamos quem comeca a cada
+        # ciclo (ciclo par/impar), para nao favorecer sistematicamente
+        # sempre a mesma rede (tipicamente a primeira em REDES_ATIVAS).
+        redes_ordenadas = list(novos_por_rede.keys())
+        if ciclo % 2 == 0:
+            redes_ordenadas.reverse()
+        novos = []
+        filas = [novos_por_rede[rede] for rede in redes_ordenadas if novos_por_rede[rede]]
+        while filas:
+            proxima_rodada = []
+            for fila in filas:
+                novos.append(fila.pop(0))
+                if fila:
+                    proxima_rodada.append(fila)
+            filas = proxima_rodada
 
         # Nº de posicoes abertas ANTES de processar: se crescer, e porque
         # uma compra abriu posicao neste ciclo -> verificamos ja a seguir
