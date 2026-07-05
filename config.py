@@ -58,8 +58,13 @@ DASHBOARD_PASSWORD = _env_texto("DASHBOARD_PASSWORD", "")
 
 
 # ==========================================================================
-# 2) Camada 1 - DeepSeek
+# 2) Camada 1 - Groq (PRINCIPAL, rapido) + DeepSeek (fallback)
 # ==========================================================================
+# A Groq tenta primeiro (latencia muito baixa); se falhar (erro, rate
+# limit, timeout) ou nao tiver chave, cai automaticamente para a DeepSeek.
+GROQ_API_KEY = _env_texto("GROQ_API_KEY")
+GROQ_MODEL = _env_texto("GROQ_MODEL", "llama-3.3-70b-versatile")
+
 DEEPSEEK_API_KEY = _env_texto("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = _env_texto("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = _env_texto("DEEPSEEK_MODEL", "deepseek-chat")
@@ -285,7 +290,13 @@ ANALISE_ONCHAIN_AVANCADA = _env_texto("ANALISE_ONCHAIN_AVANCADA", "true").lower(
 # 6) Estado da configuracao (Fase 1)
 # ==========================================================================
 def camada1_configurada() -> bool:
-    return bool(DEEPSEEK_API_KEY)
+    """True se pelo menos UM dos dois providers tiver chave (Groq OU
+    DeepSeek) - so precisas de um dos dois para a Camada 1 funcionar."""
+    return bool(GROQ_API_KEY) or bool(DEEPSEEK_API_KEY)
+
+
+def groq_configurado() -> bool:
+    return bool(GROQ_API_KEY)
 
 
 def camada2_configurada() -> bool:
@@ -508,7 +519,7 @@ def resumo() -> str:
         f"Intervalo polling : {POLL_INTERVAL_SEGUNDOS}s",
         f"Zona ambigua      : {ZONA_AMBIGUA_MIN}-{ZONA_AMBIGUA_MAX}",
         f"Liquidez minima   : {LIQUIDEZ_MINIMA_USD:.0f} USD",
-        f"Camada 1 DeepSeek : {'ON (' + DEEPSEEK_MODEL + ')' if camada1_configurada() else 'OFF (sem chave -> usa score heuristico)'}",
+        f"Camada 1 IA       : {'Groq (' + GROQ_MODEL + ') + fallback DeepSeek' if GROQ_API_KEY else ('DeepSeek (' + DEEPSEEK_MODEL + ')' if DEEPSEEK_API_KEY else 'OFF (sem chave -> usa score heuristico)')}",
         f"Camada 2 Claude   : {'ON (' + ANTHROPIC_MODEL + ')' if camada2_configurada() else 'OFF (opcional)'}",
         f"Fase 2 (trading)  : {'ON, DRY_RUN=' + str(DRY_RUN) if fase2_configurada() else 'OFF (sem WALLET_PRIVATE_KEY)'}",
         f"Envio real Solana : {'PERMITIDO' if SOLANA_PERMITIR_ENVIO_REAL else 'BLOQUEADO (so simula; liga SOLANA_PERMITIR_ENVIO_REAL)'}",

@@ -1,14 +1,18 @@
 """
-ai_layer1.py  -  CAMADA 1 (DeepSeek)
+ai_layer1.py  -  CAMADA 1 (Groq principal + DeepSeek fallback)
 ====================================
 Analise PRIMARIA. Corre para TODOS os tokens detetados. Deve ser rapida e
 barata. Recebe os dados on-chain e devolve {"score": int, "justificacao": str}.
 
-Chamamos o endpoint da DeepSeek diretamente com 'requests' (em vez do
-cliente 'openai') - mais leve, evita problemas de compilacao, e da-nos
-controlo total sobre como lemos a resposta (importante porque modelos
-como o deepseek-v4-pro podem incluir um campo extra 'reasoning_content'
-com o raciocinio interno, separado do 'content' final que queremos).
+Tenta primeiro a Groq (latencia muito baixa); se falhar por qualquer razao
+(erro, rate limit, timeout, sem chave), cai para a DeepSeek. So levanta
+RuntimeError se AMBAS falharem (ou nenhuma estiver configurada).
+
+Chamamos os dois endpoints diretamente com 'requests' (em vez do cliente
+'openai') - mais leve, evita problemas de compilacao, e da-nos controlo
+total sobre como lemos a resposta (importante porque modelos como o
+deepseek-v4-pro podem incluir um campo extra 'reasoning_content' com o
+raciocinio interno, separado do 'content' final que queremos).
 
 Funcao principal (mesma assinatura da Camada 2):
     analisar_token(dados_token) -> {"score": int, "justificacao": str}
@@ -31,17 +35,61 @@ SYSTEM_PROMPT = (
 
 
 def esta_configurada() -> bool:
-    """True se houver chave da DeepSeek no .env."""
+    """True se houver chave de algum dos dois providers (Groq ou
+    DeepSeek) no .env."""
     return config.camada1_configurada()
 
 
-def analisar_token(dados_token: dict) -> dict:
+def groq_configurado() -> bool:
+    """True se houver chave da Groq no .env."""
+    return config.groq_configurado()
+
+
+def _chamar_groq(dados_token: dict) -> dict:
+    """Envia os dados a Groq (endpoint compativel com OpenAI) e devolve
+    {"score": int, "justificacao": str}. Levanta RuntimeError em falha."""
+    if not groq_configurado():
+        raise RuntimeError("Groq sem chave de API configurada.")
+
+    prompt_utilizador = ai_utils.construir_prompt(dados_token)
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {config.GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config.GROQ_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt_utilizador},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 2000,
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        resposta = requests.post(url, headers=headers, json=payload, timeout=45)
+        resposta.raise_for_status()
+        dados = resposta.json()
+        texto = dados["choices"][0]["message"].get("content") or ""
+    except Exception as e:
+        raise RuntimeError(f"Falha na chamada a Groq: {e}") from e
+
+    if not texto.strip():
+        raise RuntimeError("Groq devolveu 'content' vazio.")
+
+    obj = ai_utils.extrair_json(texto)
+    return ai_utils.normalizar_resultado(obj)
+
+
+def _chamar_deepseek(dados_token: dict) -> dict:
     """Envia os dados a DeepSeek e devolve {"score": int, "justificacao": str}.
 
     Levanta RuntimeError se a camada nao estiver configurada ou a API falhar.
-    (O main.py apanha esse erro e continua com o score heuristico.)
     """
-    if not esta_configurada():
+    if not config.DEEPSEEK_API_KEY:
         raise RuntimeError("Camada 1 (DeepSeek) sem chave de API configurada.")
 
     prompt_utilizador = ai_utils.construir_prompt(dados_token)
@@ -82,6 +130,35 @@ def analisar_token(dados_token: dict) -> dict:
 
     obj = ai_utils.extrair_json(texto)
     return ai_utils.normalizar_resultado(obj)
+
+
+def analisar_token(dados_token: dict) -> dict:
+    """Tenta a Groq primeiro (mais rapida); se falhar, cai para a DeepSeek.
+
+    So levanta RuntimeError se AMBAS falharem (ou nenhuma estiver
+    configurada) - o main.py apanha esse erro e continua com o score
+    heuristico, tal como hoje.
+    """
+    erro_groq = None
+    if groq_configurado():
+        try:
+            resultado = _chamar_groq(dados_token)
+            print(f"[Camada 1] provider usado: Groq ({config.GROQ_MODEL})")
+            return resultado
+        except Exception as e:
+            erro_groq = e
+            print(f"[Camada 1] Groq falhou ({e}) - a tentar DeepSeek...")
+
+    try:
+        resultado = _chamar_deepseek(dados_token)
+        print(f"[Camada 1] provider usado: DeepSeek ({config.DEEPSEEK_MODEL})")
+        return resultado
+    except Exception as e:
+        if erro_groq is not None:
+            raise RuntimeError(
+                f"Groq e DeepSeek falharam. Groq: {erro_groq}. DeepSeek: {e}"
+            ) from e
+        raise
 
 
 # --------------------------------------------------------------------------
