@@ -275,9 +275,14 @@ def comprar_token(mint: str, simbolo: str, valor_usd: float, preco_sol_usd: floa
     }
 
 
-def vender_token(mint: str, percentagem: float) -> dict:
+def vender_token(mint: str, percentagem: float,
+                 motivo_venda: str | None = None) -> dict:
     """Vende 'percentagem' (0-100) da posicao aberta no token 'mint',
     trocando de volta para SOL.
+
+    'motivo_venda' (stop_loss/take_profit/trailing_puro/manual/...) e so
+    para a memoria semanal (memoria/trades_fechados.jsonl) - nao muda
+    nenhuma logica de venda.
     """
     todas = posicoes.listar_posicoes_abertas()
     posicao = todas.get(mint)
@@ -323,6 +328,7 @@ def vender_token(mint: str, percentagem: float) -> dict:
             }
         resultado = {
             "sucesso": True, "dry_run": True,
+            "valor_recebido_usd": valor_recebido_usd,
             "mensagem": (
                 f"[SIMULADO] Vendido {percentagem}% de {posicao['simbolo']} "
                 f"por ${valor_recebido_usd:.2f} "
@@ -348,12 +354,25 @@ def vender_token(mint: str, percentagem: float) -> dict:
         }
 
     # Atualiza/fecha a posicao consoante a percentagem vendida (so chega
-    # aqui se a venda foi mesmo aplicada - ver o "return" acima)
+    # aqui se a venda foi mesmo aplicada - ver o "return" acima).
+    # No fecho total, o valor recebido + motivo seguem para o posicoes.py
+    # registar o trade fechado na memoria semanal (em REAL o valor USD
+    # exato nao e conhecido aqui - segue None e o registo fica sem P/L).
     if percentagem >= 100:
-        posicoes.fechar_posicao(mint)
+        posicoes.fechar_posicao(mint,
+                                saida_usd=resultado.get("valor_recebido_usd"),
+                                motivo_saida=motivo_venda)
     else:
         nova_quantidade = posicao["quantidade_tokens"] - quantidade_a_vender
-        posicoes.atualizar_posicao(mint, quantidade_tokens=nova_quantidade)
+        campos = {"quantidade_tokens": nova_quantidade}
+        if resultado.get("valor_recebido_usd") is not None:
+            # acumula o realizado parcial (ex: take-profit de 50%) para o
+            # P/L do fecho final somar TUDO o que a posicao devolveu
+            campos["valor_realizado_parcial_usd"] = (
+                posicao.get("valor_realizado_parcial_usd", 0.0)
+                + resultado["valor_recebido_usd"]
+            )
+        posicoes.atualizar_posicao(mint, **campos)
 
     return resultado
 

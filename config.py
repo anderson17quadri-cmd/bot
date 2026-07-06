@@ -239,6 +239,34 @@ PANCAKE_ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E"
 WALLET_PRIVATE_KEY_BSC = _env_texto("WALLET_PRIVATE_KEY_BSC")
 # Limite por trade na BSC, independente da Solana (mas o mesmo default $5)
 BSC_MAX_TRADE_USD = _env_float("BSC_MAX_TRADE_USD", 5.0)
+
+# --- Filtros de COMPRA na BSC (endurecimento pos-diagnostico) -------------
+# O diagnostico do prejuizo BSC mostrou que a compra BSC so exigia score
+# da IA + liquidez minima generica - sem nenhum bloqueio duro contra o
+# golpe n.1 da BSC (honeypot: deixa comprar, nao deixa vender). Estes
+# filtros correm TODOS antes de qualquer compra BSC; cada rejeicao fica
+# no log e na memoria (memoria/decisoes.jsonl) com o motivo especifico.
+# Liquidez minima propria da BSC (acima da generica): pools PancakeSwap
+# com liquidez fina sao quase sempre rug descartavel.
+LIQUIDEZ_MINIMA_BSC_USD = _env_float("LIQUIDEZ_MINIMA_BSC_USD", 3500.0)
+# FAIL-CLOSED: sem confirmacao anti-honeypot (Honeypot.is simula uma
+# compra+venda num fork da chain), NAO compra - inclui o caso "API nao
+# respondeu/token ainda nao indexado". Poe false para voltar ao antigo.
+BSC_EXIGIR_ANTI_HONEYPOT = _env_texto("BSC_EXIGIR_ANTI_HONEYPOT", "true").lower() in ("1", "true", "yes", "sim")
+# Tetos de taxa: acima disto a matematica do stop-loss/take-profit fica
+# ficticia (vendes "a -20%" mas recebes -30%).
+BSC_BUY_TAX_MAX_PCT = _env_float("BSC_BUY_TAX_MAX_PCT", 10.0)
+BSC_SELL_TAX_MAX_PCT = _env_float("BSC_SELL_TAX_MAX_PCT", 10.0)
+# Concentracao maxima do maior holder (mais apertado que os 30% da
+# Solana - a BSC nao tem o "efeito bonding curve" do pump.fun que
+# justifica concentracao alta legitima). NOTA: o analyzer_bsc ainda nao
+# tem fonte de dados para isto (holders_disponivel=False na BSC), por
+# isso o filtro so ativa se/quando essa fonte existir - ver aviso no
+# resumo da sessao.
+BSC_TOP_HOLDER_MAX_PCT = _env_float("BSC_TOP_HOLDER_MAX_PCT", 20.0)
+# % maxima de holders que a Honeypot.is viu FALHAREM a venda (honeypot
+# "parcial"/blacklist seletiva) - com dados reais, ao contrario do acima.
+BSC_HOLDERS_FALHA_MAX_PCT = _env_float("BSC_HOLDERS_FALHA_MAX_PCT", 20.0)
 # Trava final do envio real na BSC (como no pump.fun): mesmo com
 # DRY_RUN=false, so envia on-chain se isto for true. O construtor da
 # transacao foi escrito e simulado, mas NAO validado com um swap real.
@@ -340,7 +368,7 @@ TRAILING_STOP_PCT = _env_float("TRAILING_STOP_PCT", 15.0)
 # continua ativo em paralelo, como rede de seguranca se o preco nunca
 # chegar a subir.
 MODO_SAIDA = _env_texto("MODO_SAIDA", "take_profit_parcial")
-TRAILING_PURO_PCT = _env_float("TRAILING_PURO_PCT", 30.0)
+TRAILING_PURO_PCT = _env_float("TRAILING_PURO_PCT", 50.0)
 SLIPPAGE_BPS = _env_int("SLIPPAGE_BPS", 500)
 FICHEIRO_POSICOES = _env_texto("FICHEIRO_POSICOES", "posicoes.json")
 INTERVALO_VERIFICAR_POSICOES = _env_int("INTERVALO_VERIFICAR_POSICOES", 20)

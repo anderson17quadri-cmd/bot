@@ -920,10 +920,10 @@ def api_vender():
     try:
         if chain == "bsc":
             import executor_bsc
-            resultado = executor_bsc.vender_token(mint, percentagem)
+            resultado = executor_bsc.vender_token(mint, percentagem, motivo_venda="manual")
         else:
             executor = _carregar_executor()
-            resultado = executor.vender_token(mint, percentagem)
+            resultado = executor.vender_token(mint, percentagem, motivo_venda="manual")
     except ImportError:
         return jsonify({"ok": False, "erro": "Dependências do bot em falta (solders/eth-account) — instala requirements.txt."}), 500
     except Exception as e:

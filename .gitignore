@@ -26,6 +26,8 @@ sniper_rapido.json
 copy_trade.json
 vistos_recentemente.json
 bot.pid
+# Memoria semanal (dados de execucao, nao codigo) - fica so no aparelho
+memoria/
 wallet.py.*
 gerar_wallet.py
 

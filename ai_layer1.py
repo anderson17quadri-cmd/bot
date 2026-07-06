@@ -143,6 +143,7 @@ def analisar_token(dados_token: dict) -> dict:
     if groq_configurado():
         try:
             resultado = _chamar_groq(dados_token)
+            resultado["provider"] = "groq"
             print(f"[Camada 1] provider usado: Groq ({config.GROQ_MODEL})")
             return resultado
         except Exception as e:
@@ -151,6 +152,7 @@ def analisar_token(dados_token: dict) -> dict:
 
     try:
         resultado = _chamar_deepseek(dados_token)
+        resultado["provider"] = "deepseek"
         print(f"[Camada 1] provider usado: DeepSeek ({config.DEEPSEEK_MODEL})")
         return resultado
     except Exception as e:

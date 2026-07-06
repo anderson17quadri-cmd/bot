@@ -48,6 +48,10 @@ def avaliar_com_ia(dados: dict) -> dict:
     resultado = {
         "score_final": dados["score_heuristico"],
         "fonte_score": "heuristico",
+        # Provider REAL que respondeu (groq/deepseek/claude/heuristico) -
+        # para a memoria semanal; "fonte_score" continua a ser o rotulo
+        # de display que o alerts.py ja conhece.
+        "provider_ia": "heuristico",
         "camada1": None,
         "camada2": None,
     }
@@ -59,6 +63,7 @@ def avaliar_com_ia(dados: dict) -> dict:
             resultado["camada1"] = c1
             resultado["score_final"] = c1["score"]
             resultado["fonte_score"] = "DeepSeek"
+            resultado["provider_ia"] = c1.get("provider", "deepseek")
         except RuntimeError as e:
             alerts.info(f"[yellow]Camada 1 falhou, uso heuristico:[/yellow] {e}")
 
@@ -75,6 +80,7 @@ def avaliar_com_ia(dados: dict) -> dict:
             resultado["camada2"] = c2
             resultado["score_final"] = c2["score"]
             resultado["fonte_score"] = "Claude"
+            resultado["provider_ia"] = "claude"
         except RuntimeError as e:
             alerts.info(f"[yellow]Camada 2 falhou, mantenho Camada 1:[/yellow] {e}")
 
@@ -151,6 +157,34 @@ def _e_pumpfun_curva(dados: dict) -> bool:
     return "pump" in (dados.get("dex") or "").lower()
 
 
+def _registar_decisao_memoria(dados: dict, analise_ia: dict | None,
+                              decisao: str, motivo_rejeicao: str | None,
+                              modo: str = "normal") -> None:
+    """Regista uma decisao de compra/rejeicao na memoria semanal
+    (memoria/decisoes.jsonl). Puramente informativo: nunca levanta e
+    nunca muda nenhuma decisao - se falhar, o bot segue igual."""
+    try:
+        import memoria
+        memoria.registar_decisao({
+            "token": dados.get("token_simbolo"),
+            "mint": dados.get("token_mint"),
+            "chain": dados.get("chain", "solana"),
+            "modo": modo,
+            "liquidez_usd": dados.get("liquidez_usd"),
+            "idade_s": round((dados.get("idade_minutos") or 0) * 60),
+            "holder_concentrado_pct": (
+                dados.get("top_holder_pct")
+                if dados.get("holders_disponivel") else None
+            ),
+            "score_ia": (analise_ia or {}).get("score_final"),
+            "provider_ia": (analise_ia or {}).get("provider_ia", "heuristico"),
+            "decisao": decisao,
+            "motivo_rejeicao": motivo_rejeicao,
+        })
+    except Exception as e:
+        alerts.info(f"[dim][memoria] falha ao registar decisao: {e}[/dim]")
+
+
 def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
     """Tenta comprar um token AINDA na bonding curve do pump.fun.
 
@@ -175,6 +209,9 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
             f"[dim][curva] {simbolo} score {score} > limiar apertado "
             f"{config.PUMPFUN_SCORE_COMPRA_MAX} - nao compra na curva[/dim]"
         )
+        _registar_decisao_memoria(dados, analise_ia, "rejeitado",
+                                  f"score IA {score} > {config.PUMPFUN_SCORE_COMPRA_MAX} (curva)",
+                                  modo="bonding_curve")
         return True  # era candidato de curva, mas rejeitado: NAO cai no fluxo normal
 
     # Atraso minimo: usa a idade do pool como proxy do tempo desde o lancamento
@@ -184,6 +221,9 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
             f"[dim][curva] {simbolo} demasiado recente "
             f"({idade_seg:.0f}s < {config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS}s) - espera[/dim]"
         )
+        _registar_decisao_memoria(dados, analise_ia, "rejeitado",
+                                  f"idade {idade_seg:.0f}s < atraso minimo da curva",
+                                  modo="bonding_curve")
         return True
 
     mint = dados["token_mint"]
@@ -210,6 +250,8 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
         alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
         if r.get("sucesso"):
             _notificar_compra_telegram(r["mensagem"])
+            _registar_decisao_memoria(dados, analise_ia, "comprado", None,
+                                      modo="bonding_curve")
     except Exception as e:
         alerts.info(f"[red]Falha na compra na curva de {simbolo}:[/red] {e}")
     return True  # tratado pelo caminho da curva, nao cai no fluxo normal
@@ -366,6 +408,9 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     passou, motivo = _passa_checklist_caveira(dados)
     if not passou:
         alerts.info(f"[dim][💀 sniper] {simbolo} reprovado na checklist: {motivo}[/dim]")
+        _registar_decisao_memoria(dados, None, "rejeitado",
+                                  f"checklist caveira: {motivo}",
+                                  modo="sniper_rapido")
         return False
 
     if mint in posicoes.listar_posicoes_abertas():
@@ -382,6 +427,9 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
             f"[dim][💀 sniper] {simbolo} ignorado - limite diario atingido "
             f"(restam ${sniper_rapido.restante_hoje_usd():.2f})[/dim]"
         )
+        _registar_decisao_memoria(dados, None, "rejeitado",
+                                  "limite diario do caveira atingido",
+                                  modo="sniper_rapido")
         return False
 
     # Filtro de QUALIDADE (momentum) - o mais lento dos checks deste modo
@@ -390,6 +438,9 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     passou_qualidade, motivo_qualidade = _passa_filtro_qualidade_caveira(dados)
     if not passou_qualidade:
         alerts.info(f"[dim][💀 sniper] {simbolo} reprovado no filtro de qualidade: {motivo_qualidade}[/dim]")
+        _registar_decisao_memoria(dados, None, "rejeitado",
+                                  f"filtro de qualidade caveira: {motivo_qualidade}",
+                                  modo="sniper_rapido")
         return False
     alerts.info(f"[dim][💀 sniper] {simbolo}: {motivo_qualidade}[/dim]")
 
@@ -420,6 +471,8 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
                 f"(passou a checklist binaria, SEM esperar pela IA)[/bold magenta]"
             )
             _notificar_compra_telegram(f"💀 [SNIPER] {r['mensagem']}")
+            _registar_decisao_memoria(dados, None, "comprado", None,
+                                      modo="sniper_rapido")
             return True
         alerts.info(f"[yellow]💀 [sniper] falha ao comprar {simbolo}: {r.get('mensagem')}[/yellow]")
     except Exception as e:
@@ -451,7 +504,7 @@ def vender_sniper_se_score_mau(dados: dict, analise_ia: dict) -> None:
         f"- venda de urgencia, ignorando as regras normais de stop-loss[/bold red]"
     )
     try:
-        r = executor.vender_token(mint, 100)
+        r = executor.vender_token(mint, 100, motivo_venda="venda_urgente_ia")
         cor = "green" if r.get("sucesso") else "red"
         alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
     except Exception as e:
@@ -533,22 +586,87 @@ def tentar_copy_trade(sinal: dict) -> None:
 def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
     """Compra na BSC (via PancakeSwap), o equivalente ao tentar_comprar da
     Solana. Precisa da wallet BSC configurada; usa o limite BSC_MAX_TRADE_USD.
-    Nunca deixa uma falha derrubar o bot."""
+    Nunca deixa uma falha derrubar o bot.
+
+    FILTROS ENDURECIDOS (pos-diagnostico do prejuizo BSC): alem do score
+    da IA, a compra agora exige liquidez minima PROPRIA da BSC, confirmacao
+    anti-honeypot FAIL-CLOSED (a Honeypot.is simula compra+venda num fork
+    da chain - se nao confirmar que o token deixa vender, nao compra),
+    taxas de compra/venda dentro do teto, holders sem falhas de venda em
+    massa e rota de venda viva na PancakeSwap. Cada rejeicao fica no log
+    E na memoria semanal com o motivo especifico, para calibrar limiares."""
     if not config.fase2_bsc_configurada():
         return  # sem WALLET_PRIVATE_KEY_BSC, trading BSC desligado
 
-    score = analise_ia["score_final"]
-    if score > config.SCORE_COMPRA_MAX:
-        return
-
-    # Piso de liquidez (mesma regra do caminho Solana): nao compra tokens
-    # com liquidez abaixo da minima conhecida.
-    liquidez = dados.get("liquidez_usd") or 0.0
-    if liquidez < config.LIQUIDEZ_MINIMA_USD:
-        return
-
     mint = dados["token_mint"]
     simbolo = dados["token_simbolo"]
+
+    def _rejeitar(motivo: str) -> None:
+        alerts.info(f"[dim][BSC] {simbolo} rejeitado: {motivo}[/dim]")
+        _registar_decisao_memoria(dados, analise_ia, "rejeitado", motivo)
+
+    score = analise_ia["score_final"]
+    if score > config.SCORE_COMPRA_MAX:
+        _rejeitar(f"score IA {score} > {config.SCORE_COMPRA_MAX}")
+        return
+
+    # Filtro 5: liquidez minima PROPRIA da BSC (mais alta que a generica -
+    # pool PancakeSwap com liquidez fina e quase sempre rug descartavel)
+    liquidez = dados.get("liquidez_usd") or 0.0
+    if liquidez < config.LIQUIDEZ_MINIMA_BSC_USD:
+        _rejeitar(f"liquidez ${liquidez:,.0f} < ${config.LIQUIDEZ_MINIMA_BSC_USD:,.0f} BSC")
+        return
+
+    # Filtro 1: anti-honeypot FAIL-CLOSED. honeypot=True bloqueia SEMPRE
+    # (independentemente do toggle); sem confirmacao (API em baixo ou
+    # token ainda nao indexado - o caso tipico dos scams com minutos de
+    # vida), so compra se o utilizador desligar explicitamente a exigencia.
+    if dados.get("honeypot") is True:
+        _rejeitar("honeypot detectado (simulacao diz que nao deixa vender)")
+        return
+    if config.BSC_EXIGIR_ANTI_HONEYPOT:
+        if dados.get("analise_indisponivel"):
+            _rejeitar("anti-honeypot sem resposta (token nao indexado/API em baixo) - fail-closed")
+            return
+        # Filtro 3: teto de taxas. Taxa desconhecida com a exigencia ligada
+        # = nao confirmado = nao compra (fail-closed, como pedido).
+        sell_tax = dados.get("sell_tax")
+        buy_tax = dados.get("buy_tax")
+        if sell_tax is None:
+            _rejeitar("taxa de venda desconhecida (simulacao incompleta) - fail-closed")
+            return
+        if sell_tax > config.BSC_SELL_TAX_MAX_PCT:
+            _rejeitar(f"taxa de venda {sell_tax:.1f}% > {config.BSC_SELL_TAX_MAX_PCT:.0f}%")
+            return
+        if buy_tax is not None and buy_tax > config.BSC_BUY_TAX_MAX_PCT:
+            _rejeitar(f"taxa de compra {buy_tax:.1f}% > {config.BSC_BUY_TAX_MAX_PCT:.0f}%")
+            return
+
+    # Filtro 4a: holders que a Honeypot.is viu FALHAREM a venda (honeypot
+    # "parcial"/blacklist seletiva) - so avalia com amostra minima (>= 20)
+    holders_total = dados.get("holders_total")
+    holders_falharam = dados.get("holders_falharam")
+    if (holders_total and holders_total >= 20 and holders_falharam is not None
+            and (holders_falharam / holders_total * 100) > config.BSC_HOLDERS_FALHA_MAX_PCT):
+        _rejeitar(f"{holders_falharam}/{holders_total} holders nao conseguem vender "
+                  f"(> {config.BSC_HOLDERS_FALHA_MAX_PCT:.0f}%)")
+        return
+
+    # Filtro 4b: concentracao do maior holder (20% na BSC, mais apertado
+    # que os 30% da Solana). NOTA: o analyzer_bsc ainda nao tem fonte de
+    # dados de concentracao (holders_disponivel=False na BSC) - este
+    # filtro fica pronto e ativa sozinho se/quando essa fonte existir.
+    # Ate la, avisa SEMPRE no log que foi saltado, para ninguem assumir
+    # que esta a proteger quando nao esta.
+    if dados.get("holders_disponivel"):
+        top_pct = dados.get("top_holder_pct") or 0.0
+        if top_pct > config.BSC_TOP_HOLDER_MAX_PCT:
+            _rejeitar(f"holder concentrado {top_pct:.0f}% > {config.BSC_TOP_HOLDER_MAX_PCT:.0f}%")
+            return
+    else:
+        alerts.info(f"[dim][BSC] {simbolo}: filtro de holder concentrado IGNORADO - "
+                    f"sem fonte de dados de holders na BSC (ver BSC_TOP_HOLDER_MAX_PCT no config.py)[/dim]")
+
     if mint in posicoes.listar_posicoes_abertas():
         return
 
@@ -559,6 +677,15 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
 
     try:
         import executor_bsc
+
+        # Filtro 2: rota de venda viva na PancakeSwap ANTES de comprar
+        # (o check mais caro - 3 eth_calls - por isso corre em ultimo)
+        ok_rota, motivo_rota = executor_bsc.verificar_rota_venda(
+            mint, config.BSC_MAX_TRADE_USD)
+        if not ok_rota:
+            _rejeitar(f"rota de venda: {motivo_rota}")
+            return
+
         r = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD,
                                        dex=dados.get("dex"),
                                        liquidez_usd=dados.get("liquidez_usd"),
@@ -567,6 +694,7 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
         alerts.info(f"[{cor}]{r['mensagem']}[/{cor}]")
         if r.get("sucesso"):
             _notificar_compra_telegram(r["mensagem"])
+            _registar_decisao_memoria(dados, analise_ia, "comprado", None)
     except Exception as e:
         alerts.info(f"[red]Falha na compra BSC de {simbolo}:[/red] {e}")
 
@@ -590,6 +718,8 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
 
     score = analise_ia["score_final"]
     if score > config.SCORE_COMPRA_MAX:
+        _registar_decisao_memoria(dados, analise_ia, "rejeitado",
+                                  f"score IA {score} > {config.SCORE_COMPRA_MAX}")
         return  # risco demasiado alto, nao compra
 
     # Piso de liquidez no caminho NORMAL: so compra por aqui um token com
@@ -604,6 +734,9 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
             f"[dim]{dados['token_simbolo']}: liquidez ${liquidez:,.0f} < minima "
             f"${config.LIQUIDEZ_MINIMA_USD:,.0f} - nao compra no caminho normal[/dim]"
         )
+        _registar_decisao_memoria(dados, analise_ia, "rejeitado",
+                                  f"liquidez ${liquidez:,.0f} < minima "
+                                  f"${config.LIQUIDEZ_MINIMA_USD:,.0f}")
         return
 
     mint = dados["token_mint"]
@@ -640,17 +773,20 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
         alerts.info(f"[green]{etiqueta} COMPRA: {resultado['mensagem']}[/green]")
         if resultado.get("sucesso"):
             _notificar_compra_telegram(resultado["mensagem"])
+            _registar_decisao_memoria(dados, analise_ia, "comprado", None)
     except Exception as e:
         alerts.info(f"[red]Falha na compra de {simbolo}:[/red] {e}")
 
 
-def _vender_posicao(mint: str, chain: str, percentagem: float) -> dict:
+def _vender_posicao(mint: str, chain: str, percentagem: float,
+                    motivo: str | None = None) -> dict:
     """Vende uma percentagem de uma posicao, escolhendo o executor certo
-    pela chain (PancakeSwap para BSC, Jupiter para Solana)."""
+    pela chain (PancakeSwap para BSC, Jupiter para Solana). 'motivo' segue
+    para a memoria semanal (trades_fechados.jsonl) - nao muda a venda."""
     if chain == "bsc":
         import executor_bsc
-        return executor_bsc.vender_token(mint, percentagem)
-    return executor.vender_token(mint, percentagem)
+        return executor_bsc.vender_token(mint, percentagem, motivo_venda=motivo)
+    return executor.vender_token(mint, percentagem, motivo_venda=motivo)
 
 
 def verificar_posicoes() -> None:
@@ -716,7 +852,7 @@ def verificar_posicoes() -> None:
                 f"({variacao_pct:.1f}%). A vender tudo...[/red]"
             )
             try:
-                r = _vender_posicao(mint, chain, 100)
+                r = _vender_posicao(mint, chain, 100, motivo="stop_loss")
                 alerts.info(f"[red]{r['mensagem']}[/red]")
                 if r.get("sucesso"):
                     lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
@@ -746,7 +882,7 @@ def verificar_posicoes() -> None:
                     f"{config.TEMPO_MAXIMO_SEM_LUCRO_HORAS}h sem valorizacao)...[/yellow]"
                 )
                 try:
-                    r = _vender_posicao(mint, chain, 100)
+                    r = _vender_posicao(mint, chain, 100, motivo="tempo_sem_lucro")
                     alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
                     if r.get("sucesso"):
                         lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
@@ -776,7 +912,7 @@ def verificar_posicoes() -> None:
                         f"a vender mais cedo, sem esperar pelo take-profit normal...[/yellow]"
                     )
                     try:
-                        r = _vender_posicao(mint, chain, 100)
+                        r = _vender_posicao(mint, chain, 100, motivo="reversao_volume")
                         alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
                         if r.get("sucesso"):
                             lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
@@ -803,7 +939,7 @@ def verificar_posicoes() -> None:
                         f"A vender tudo...[/yellow]"
                     )
                     try:
-                        r = _vender_posicao(mint, chain, 100)
+                        r = _vender_posicao(mint, chain, 100, motivo="trailing_puro")
                         alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
                         if r.get("sucesso"):
                             lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
@@ -824,7 +960,8 @@ def verificar_posicoes() -> None:
                     f"{config.TAKE_PROFIT_VENDER_PCT}%...[/green]"
                 )
                 try:
-                    r = _vender_posicao(mint, chain, config.TAKE_PROFIT_VENDER_PCT)
+                    r = _vender_posicao(mint, chain, config.TAKE_PROFIT_VENDER_PCT,
+                                    motivo="take_profit")
                     alerts.info(f"[green]{r['mensagem']}[/green]")
                     posicoes.atualizar_posicao(mint, take_profit_disparado=True)
                     if r.get("sucesso"):
@@ -844,13 +981,43 @@ def verificar_posicoes() -> None:
                         f"A vender o resto...[/yellow]"
                     )
                     try:
-                        r = _vender_posicao(mint, chain, 100)
+                        r = _vender_posicao(mint, chain, 100, motivo="trailing_stop")
                         alerts.info(f"[yellow]{r['mensagem']}[/yellow]")
                         if r.get("sucesso"):
                             lucro_est = pos["valor_investido_usd"] * (variacao_pct / 100)
                             _notificar_venda_telegram(f"🟡 TRAILING STOP: {r['mensagem']}", lucro_est)
                     except Exception as e:
                         alerts.info(f"[red]Falha ao vender {pos['simbolo']}:[/red] {e}")
+
+
+def _registar_watchlist_memoria(r: dict, preco_usd, abertas: set) -> None:
+    """Regista uma reavaliacao da watchlist na memoria semanal
+    (memoria/watchlist_historico.jsonl). Nunca levanta. O preco segue a
+    MESMA convencao da reavaliacao normal (BSC: valor de 1 token inteiro;
+    Solana: preco por unidade minima); 'liquidez_usd' e o valor conhecido
+    na DETECAO - este ciclo nao volta a cotar liquidez de proposito (so
+    preco/rota), para nao duplicar chamadas as APIs."""
+    try:
+        import memoria
+        tempo_min = None
+        if r.get("adicionado_em"):
+            try:
+                adicionado = datetime.fromisoformat(r["adicionado_em"])
+                tempo_min = round(
+                    (datetime.now(timezone.utc) - adicionado).total_seconds() / 60, 1)
+            except (TypeError, ValueError):
+                pass
+        memoria.registar_watchlist({
+            "token": r.get("simbolo"),
+            "mint": r.get("mint"),
+            "chain": r.get("chain", "solana"),
+            "preco_usd": preco_usd,
+            "liquidez_usd": r.get("liquidez_usd"),
+            "tempo_desde_deteccao_min": tempo_min,
+            "em_posicao": r.get("mint") in abertas,
+        })
+    except Exception as e:
+        alerts.info(f"[dim][memoria] falha ao registar watchlist: {e}[/dim]")
 
 
 def reavaliar_watchlist() -> None:
@@ -868,17 +1035,26 @@ def reavaliar_watchlist() -> None:
     preco_sol = None
     LAMPORTS_TESTE = 10_000_000  # 0.01 SOL da uma cotacao representativa
 
+    # Posicoes abertas (uma leitura para o loop todo) - para a memoria
+    # semanal saber se o token da watchlist tambem esta em carteira
+    try:
+        abertas = set(posicoes.listar_posicoes_abertas().keys())
+    except Exception:
+        abertas = set()
+
     for r in registos:
         mint = r.get("mint")
         if not mint:
             continue
         chain = r.get("chain", "solana")
+        preco_registado = None  # o preco desta reavaliacao (None = sem rota)
         try:
             if chain == "bsc":
                 # BSC: uma quantidade simbolica do token -> ha rota na PancakeSwap?
                 import executor_bsc
                 valor = executor_bsc.valor_atual_usd(mint, 10**18)  # 1 token (18 dec)
                 if valor and valor > 0:
+                    preco_registado = valor
                     watchlist.atualizar_reavaliacao(mint, valor, liquidez_viva=True)
                 else:
                     watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
@@ -889,12 +1065,14 @@ def reavaliar_watchlist() -> None:
                 tokens_recebidos = float(cot.get("outAmount", 0))
                 if tokens_recebidos > 0:
                     preco_unitario = (0.01 * preco_sol) / tokens_recebidos
+                    preco_registado = preco_unitario
                     watchlist.atualizar_reavaliacao(mint, preco_unitario, liquidez_viva=True)
                 else:
                     watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
         except Exception:
             # Sem rota de troca -> liquidez provavelmente morta/rugada
             watchlist.atualizar_reavaliacao(mint, None, liquidez_viva=False)
+        _registar_watchlist_memoria(r, preco_registado, abertas)
         time.sleep(0.3)  # pausa curta para nao martelar as APIs
 
 

@@ -108,6 +108,29 @@ def valor_atual_usd(mint: str, quantidade_tokens: float) -> float | None:
         return None
 
 
+def verificar_rota_venda(mint: str, valor_usd: float) -> tuple[bool, str]:
+    """Confirma, ANTES de comprar, que ja existe rota de VENDA (token ->
+    WBNB) na PancakeSwap para a quantidade que uma compra de 'valor_usd'
+    daria. So leituras (eth_call), nunca gasta nada. Complementa o
+    anti-honeypot: nao deteta honeypots (esses bloqueiam a transferencia,
+    nao a cotacao), mas apanha pools sem par de saida utilizavel.
+    Devolve (ok, motivo)."""
+    try:
+        preco_bnb = _preco_bnb_usd()
+        if preco_bnb <= 0:
+            return False, "preco do BNB indisponivel"
+        amount_in_wei = int((valor_usd / preco_bnb) * 1e18)
+        tokens = _quanto_recebo(amount_in_wei, mint)
+        if tokens <= 0:
+            return False, "sem rota de compra (WBNB -> token cota 0)"
+        bnb_de_volta = _quanto_recebo_ao_vender(tokens, mint)
+        if bnb_de_volta <= 0:
+            return False, "sem rota de venda (token -> WBNB cota 0)"
+        return True, "rota de venda confirmada"
+    except Exception as e:
+        return False, f"verificacao de rota falhou: {e}"
+
+
 def comprar_token(mint: str, simbolo: str, valor_usd: float, dex: str | None = None,
                   liquidez_usd: float | None = None,
                   idade_minutos_compra: float | None = None) -> dict:
@@ -236,9 +259,14 @@ def _comprar_real(mint, simbolo, valor_usd, amount_in_wei, tokens_estimados, pre
                 "mensagem": f"[BSC] falha ao construir/enviar: {e}"}
 
 
-def vender_token(mint: str, percentagem: float) -> dict:
+def vender_token(mint: str, percentagem: float,
+                 motivo_venda: str | None = None) -> dict:
     """Vende 'percentagem' (0-100) da posicao aberta no token BSC,
     trocando de volta para BNB via PancakeSwap.
+
+    'motivo_venda' (stop_loss/take_profit/trailing_puro/manual/...) e so
+    para a memoria semanal (memoria/trades_fechados.jsonl) - nao muda
+    nenhuma logica de venda.
 
     Dry-run: simula com cotacao real e regista a venda na carteira
     virtual. Real: faz approve (se preciso) + swapExactTokensForETH,
@@ -284,24 +312,36 @@ def vender_token(mint: str, percentagem: float) -> dict:
             return {"sucesso": False, "dry_run": True, "chain": "bsc",
                     "mensagem": (f"[SIMULADO][BSC] Venda de {pos['simbolo']} rejeitada: "
                                  f"cotacao anormal (${valor_recebido_usd:,.2f}). Posição mantida aberta.")}
-        _fechar_ou_reduzir(mint, pos, quantidade_a_vender, percentagem)
+        _fechar_ou_reduzir(mint, pos, quantidade_a_vender, percentagem,
+                           valor_recebido_usd, motivo_venda)
         return {"sucesso": True, "dry_run": True, "chain": "bsc",
                 "mensagem": (f"[SIMULADO][BSC] Vendido {percentagem:.0f}% de {pos['simbolo']} "
                              f"por ${valor_recebido_usd:.2f}")}
 
     # ---------------- REAL ----------------
     return _vender_real(mint, pos, quantidade_a_vender, percentagem, bnb_wei,
-                        valor_recebido_usd, investido_proporcional, preco_venda_usd)
+                        valor_recebido_usd, investido_proporcional, preco_venda_usd,
+                        motivo_venda)
 
 
-def _fechar_ou_reduzir(mint, pos, quantidade_vendida, percentagem):
-    """Fecha a posicao (venda de 100%) ou reduz a quantidade restante."""
+def _fechar_ou_reduzir(mint, pos, quantidade_vendida, percentagem,
+                       valor_recebido_usd=None, motivo_venda=None):
+    """Fecha a posicao (venda de 100%) ou reduz a quantidade restante.
+    No fecho total passa o valor recebido + motivo ao posicoes.py, que
+    regista o trade fechado na memoria semanal; em vendas parciais
+    acumula o realizado para o P/L do fecho final ficar correto."""
     import posicoes
     if percentagem >= 100:
-        posicoes.fechar_posicao(mint)
+        posicoes.fechar_posicao(mint, saida_usd=valor_recebido_usd,
+                                motivo_saida=motivo_venda)
     else:
         nova = pos.get("quantidade_tokens", 0) - quantidade_vendida
-        posicoes.atualizar_posicao(mint, quantidade_tokens=nova)
+        campos = {"quantidade_tokens": nova}
+        if valor_recebido_usd is not None:
+            campos["valor_realizado_parcial_usd"] = (
+                pos.get("valor_realizado_parcial_usd", 0.0) + valor_recebido_usd
+            )
+        posicoes.atualizar_posicao(mint, **campos)
 
 
 def _enviar_tx(conta, tx_base: dict) -> str:
@@ -344,7 +384,8 @@ def _esperar_confirmacao_bsc(tx_hash: str, timeout: float) -> bool:
 
 
 def _vender_real(mint, pos, quantidade, percentagem, bnb_wei, valor_recebido_usd,
-                 investido_proporcional, preco_venda_usd) -> dict:
+                 investido_proporcional, preco_venda_usd,
+                 motivo_venda=None) -> dict:
     """Caminho REAL da venda: approve (se preciso) + swap. NAO validado
     com um swap real em mainnet - trancado por BSC_PERMITIR_ENVIO_REAL."""
     try:
@@ -401,7 +442,10 @@ def _vender_real(mint, pos, quantidade, percentagem, bnb_wei, valor_recebido_usd
         # real esta na wallet on-chain, nao aqui). Isto tambem corrige uma
         # inconsistencia: as compras reais nunca tocaram no carteira.json,
         # mas esta venda real tocava - agora ambas se comportam da mesma forma.
-        _fechar_ou_reduzir(mint, pos, quantidade, percentagem)
+        # valor_recebido_usd aqui e a estimativa da cotacao pre-swap (o
+        # real on-chain pode variar um pouco com o slippage)
+        _fechar_ou_reduzir(mint, pos, quantidade, percentagem,
+                           valor_recebido_usd, motivo_venda)
         return {"sucesso": True, "dry_run": False, "chain": "bsc", "assinatura": tx_hash,
                 "mensagem": f"[BSC] Vendido {percentagem:.0f}% de {pos['simbolo']} - tx {tx_hash[:12]}..."}
 

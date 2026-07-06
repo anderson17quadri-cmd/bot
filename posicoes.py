@@ -78,11 +78,57 @@ def abrir_posicao(
     return posicao
 
 
-def fechar_posicao(mint: str) -> None:
+def fechar_posicao(mint: str, saida_usd: float | None = None,
+                   motivo_saida: str | None = None) -> None:
+    """Apaga a posicao e, antes disso, regista o trade fechado na memoria
+    semanal (memoria/trades_fechados.jsonl). 'saida_usd' e o valor da
+    venda FINAL (as vendas parciais anteriores ja estao acumuladas na
+    propria posicao em 'valor_realizado_parcial_usd'). Os dois campos
+    novos sao opcionais - chamadas antigas continuam a funcionar."""
     posicoes = carregar_posicoes()
     if mint in posicoes:
+        _registar_trade_fechado(posicoes[mint], saida_usd, motivo_saida)
         del posicoes[mint]
         guardar_posicoes(posicoes)
+
+
+def _registar_trade_fechado(pos: dict, saida_usd, motivo_saida) -> None:
+    """Regista o fecho na memoria semanal. NUNCA levanta - o registo e
+    informativo e nao pode, em caso algum, impedir o fecho da posicao."""
+    try:
+        import memoria
+        ts_abertura = pos.get("timestamp_compra")
+        agora = datetime.now(timezone.utc)
+        duracao_min = None
+        if ts_abertura:
+            try:
+                aberta = datetime.fromisoformat(ts_abertura)
+                duracao_min = round((agora - aberta).total_seconds() / 60, 1)
+            except (TypeError, ValueError):
+                pass
+        entrada = pos.get("valor_investido_usd") or 0.0
+        # saida TOTAL = parciais ja realizadas (take-profit) + venda final
+        saida_total = None
+        pl = None
+        if saida_usd is not None:
+            saida_total = pos.get("valor_realizado_parcial_usd", 0.0) + saida_usd
+            pl = saida_total - entrada
+        memoria.registar_trade_fechado({
+            "timestamp_abertura": ts_abertura,
+            "timestamp_fecho": agora.isoformat(),
+            "token": pos.get("simbolo"),
+            "mint": pos.get("mint"),
+            "chain": pos.get("chain", "solana"),
+            "modo": pos.get("modo", "normal"),
+            "entrada_usd": round(entrada, 4),
+            "saida_usd": round(saida_total, 4) if saida_total is not None else None,
+            "pl_usd": round(pl, 4) if pl is not None else None,
+            "pl_pct": round(pl / entrada * 100, 2) if (pl is not None and entrada) else None,
+            "duracao_min": duracao_min,
+            "motivo_saida": motivo_saida or "desconhecido",
+        })
+    except Exception as e:
+        print(f"[memoria] falha ao registar trade fechado: {e}")
 
 
 def atualizar_posicao(mint: str, **campos) -> None:
