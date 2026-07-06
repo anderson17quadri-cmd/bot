@@ -24,6 +24,7 @@ import time
 import requests
 
 import config
+import rate_limiter
 
 
 class RPCError(Exception):
@@ -46,6 +47,19 @@ class RPCRateLimit(RPCError):
 # por isso ser "educado" com pausas ajuda bastante.
 MAX_TENTATIVAS = 4
 ESPERA_BASE = 1.5  # segundos (vai crescendo: 1.5, 3, 6, ...)
+
+# Limitador GLOBAL de pedidos/segundo, partilhado por TODAS as chamadas
+# rpc_call() (analyzer, momentum/caveira, deployer, liquidez, copy...).
+# Espaca os pedidos PREVENTIVAMENTE para nunca bater o limite do plano do
+# RPC (Helius), em vez de so reagir ao 429 depois de ele acontecer - o
+# retry com backoff acima continua como rede de seguranca, mas passa a
+# ser a excecao, nao a regra (o diagnostico real mostrou 717 tokens do
+# Caveira rejeitados por "dados on-chain indisponiveis" causados por 429
+# persistente mesmo com retry). Taxa configuravel no .env
+# (RPC_MAX_PEDIDOS_POR_SEGUNDO, default 8 - conservador para o plano
+# gratuito da Helius, que aguenta ~10/s). Thread-safe: o websocket e o
+# copy trading correm em threads proprias e partilham este mesmo balde.
+_limitador_global = rate_limiter.RateLimiter(config.RPC_MAX_PEDIDOS_POR_SEGUNDO)
 
 
 def rpc_call(method: str, params: list, timeout: int = 15, tentativas: int = MAX_TENTATIVAS) -> dict:
@@ -72,6 +86,9 @@ def rpc_call(method: str, params: list, timeout: int = 15, tentativas: int = MAX
 
     ultimo_erro = ""
     for tentativa in range(1, tentativas + 1):
+        # Espaco preventivo entre pedidos (tambem nas retentativas - um
+        # retry e um pedido como outro qualquer para o limite do RPC)
+        _limitador_global.adquirir()
         try:
             resposta = requests.post(config.SOLANA_RPC_URL, json=corpo, timeout=timeout)
         except requests.RequestException as e:
@@ -387,6 +404,9 @@ def contar_tokens_criados(deployer: str, janela_horas: int = 48) -> int | None:
         if not api_key:
             return None
 
+        # A API Enhanced partilha o plano/creditos da Helius com o RPC -
+        # passa pelo mesmo balde global para o total nunca exceder a taxa
+        _limitador_global.adquirir()
         resposta = requests.get(
             f"https://api.helius.xyz/v0/addresses/{deployer}/transactions",
             params={"api-key": api_key, "limit": 100},
