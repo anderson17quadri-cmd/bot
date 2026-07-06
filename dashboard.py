@@ -181,11 +181,13 @@ def _ler_radar() -> list:
 # ==========================================================================
 # Cotacao Jupiter (preco atual estimado das posicoes abertas)
 # ==========================================================================
-def _valor_atual_usd(mint: str, quantidade_tokens: float):
-    """Pergunta a Jupiter quanto valem 'quantidade_tokens' deste mint em
-    USDC (1 USDC = 1 USD). E a mesma logica do executor.vender_token em
-    dry-run. Devolve None se a consulta falhar (ex: sem internet, token
-    sem liquidez) - o frontend mostra "N/A" nesse caso."""
+def _valor_atual_usd(mint: str, quantidade_tokens: float, chain: str = "solana"):
+    """Quanto valem 'quantidade_tokens' deste mint em USD, escolhendo a
+    fonte de cotacao pela chain: Jupiter para Solana, PancakeSwap para BSC
+    (a Jupiter nao conhece mints 0x... - era por isso que as posicoes BSC
+    apareciam sempre como "N/A" no dashboard). Devolve None se a consulta
+    falhar (ex: sem internet, token sem liquidez) - o frontend mostra
+    "N/A" nesse caso, e a falha fica registada no log do dashboard."""
     agora = time.time()
 
     # 1) Ja temos um valor recente em cache? Usa esse.
@@ -193,7 +195,17 @@ def _valor_atual_usd(mint: str, quantidade_tokens: float):
     if em_cache and (agora - em_cache[0]) < CACHE_SEGUNDOS:
         return em_cache[1]
 
-    # 2) Senao, pergunta a Jupiter (consulta apenas - nao mexe em dinheiro)
+    # 2a) BSC: cota na PancakeSwap (consulta apenas - nao mexe em dinheiro)
+    if chain == "bsc":
+        import executor_bsc
+        valor = executor_bsc.valor_atual_usd(mint, quantidade_tokens)
+        if valor is None:
+            # Nunca silenciar: se a cotacao falhar de verdade, fica no log
+            print(f"[dashboard] cotacao BSC falhou/sem rota para {mint[:10]}...")
+        _cache_cotacoes[mint] = (agora, valor)
+        return valor
+
+    # 2b) Solana: pergunta a Jupiter (consulta apenas - nao mexe em dinheiro)
     try:
         resposta = requests.get(config.JUPITER_QUOTE_URL, params={
             "inputMint": mint,
@@ -491,7 +503,7 @@ def api_posicoes():
         investido = p.get("valor_investido_usd", 0.0)
         preco_compra_raw = p.get("preco_compra_usd", 0.0)
 
-        valor_atual = _valor_atual_usd(mint, quantidade) if quantidade else None
+        valor_atual = _valor_atual_usd(mint, quantidade, p.get("chain", "solana")) if quantidade else None
 
         # Lucro nao realizado = quanto valeria se vendesses agora - investido
         lucro_nao_realizado = (

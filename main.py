@@ -676,7 +676,11 @@ def verificar_posicoes() -> None:
                 # BSC: valor atual via PancakeSwap (token -> BNB -> USD)
                 import executor_bsc
                 valor_atual_usd = executor_bsc.valor_atual_usd(mint, quantidade)
-                if valor_atual_usd is None:
+                # <= 0 tambem e tratado como "sem dados" - NUNCA decidir uma
+                # venda (stop-loss/tempo/trailing) com base numa cotacao
+                # invalida ou zerada; salta a posicao neste ciclo e tenta
+                # outra vez no proximo
+                if valor_atual_usd is None or valor_atual_usd <= 0:
                     raise RuntimeError("sem rota de venda na PancakeSwap")
                 # preco por unidade MINIMA (raw) - a mesma convencao agora
                 # usada em preco_compra_usd (bug corrigido: era por token
@@ -688,6 +692,10 @@ def verificar_posicoes() -> None:
                     mint, config.MINT_USDC, int(quantidade)
                 )
                 valor_atual_usd = float(cot["outAmount"]) / 1_000_000
+                # Mesma protecao do lado Solana: cotacao a 0 nao e um preco,
+                # e ausencia de dados - nao pode disparar stop-loss a -100%
+                if valor_atual_usd <= 0:
+                    raise RuntimeError("cotacao Jupiter devolveu 0")
                 preco_atual = valor_atual_usd / quantidade if quantidade else 0
         except Exception as e:
             alerts.info(f"[yellow]Nao consegui cotar {pos['simbolo']}:[/yellow] {e}")
