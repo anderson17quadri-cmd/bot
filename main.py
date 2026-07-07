@@ -157,6 +157,43 @@ def _e_pumpfun_curva(dados: dict) -> bool:
     return "pump" in (dados.get("dex") or "").lower()
 
 
+def _valor_trade_dinamico(chain: str = "solana",
+                          teto_modo: float | None = None) -> float:
+    """Valor da PROXIMA compra: TRADE_PCT_SALDO% do saldo livre atual,
+    preso entre TRADE_MIN_USD e TRADE_MAX_USD, e nunca acima do teto do
+    modo (o valor fixo antigo de cada modo, que passa a funcionar como
+    teto de seguranca - os executores ja o impoem por dentro).
+
+    Saldo usado: em DRY_RUN, o saldo virtual (carteira.json); em REAL, o
+    saldo on-chain da wallet da chain respetiva. Se nao der para
+    determinar o saldo, usa TRADE_MIN_USD - fail-safe deliberado: na
+    duvida arrisca-se o MINIMO, nunca o maximo."""
+    saldo = None
+    try:
+        if config.DRY_RUN:
+            import carteira
+            saldo = carteira.saldo_disponivel()
+        elif chain == "bsc":
+            import wallet_bsc
+            import executor_bsc
+            saldo = (wallet_bsc.obter_saldo_bnb() or 0) * executor_bsc._preco_bnb_usd()
+        else:
+            import wallet
+            saldo = wallet.obter_saldo_sol() * obter_preco_sol_usd()
+    except Exception:
+        saldo = None
+
+    if not saldo or saldo <= 0:
+        valor = config.TRADE_MIN_USD
+    else:
+        valor = max(config.TRADE_MIN_USD,
+                    min(config.TRADE_MAX_USD,
+                        saldo * config.TRADE_PCT_SALDO / 100.0))
+    if teto_modo is not None:
+        valor = min(valor, teto_modo)
+    return round(valor, 2)
+
+
 def _registar_decisao_memoria(dados: dict, analise_ia: dict | None,
                               decisao: str, motivo_rejeicao: str | None,
                               modo: str = "normal") -> None:
@@ -230,9 +267,12 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
     if mint in posicoes.listar_posicoes_abertas():
         return True
 
+    # Dimensionamento dinamico: % do saldo livre, dentro dos limites
+    valor = _valor_trade_dinamico(teto_modo=config.PUMPFUN_MAX_TRADE_USD)
+
     if config.DRY_RUN:
         import carteira
-        if carteira.saldo_disponivel() < config.PUMPFUN_MAX_TRADE_USD:
+        if carteira.saldo_disponivel() < valor:
             return True
 
     try:
@@ -240,7 +280,7 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
         preco_sol_usd = obter_preco_sol_usd()
         r = executor_pumpfun.comprar_na_curva(
             mint=mint, simbolo=simbolo,
-            valor_usd=config.PUMPFUN_MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
+            valor_usd=valor, preco_sol_usd=preco_sol_usd,
             liquidez_usd=dados.get("liquidez_usd"),
             idade_minutos_compra=dados.get("idade_minutos"),
             top_holder_pct=dados.get("top_holder_pct"),
@@ -416,7 +456,11 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     if mint in posicoes.listar_posicoes_abertas():
         return False  # ja ha posicao neste token (de qualquer modo)
 
-    valor = config.SNIPER_RAPIDO_VALOR_USD
+    # Dimensionamento dinamico: % do saldo livre, dentro dos limites
+    # (SNIPER_RAPIDO_VALOR_USD passa a ser o TETO deste modo - por
+    # defeito $1, o que na pratica mantem o sniper na compra minuscula
+    # de sempre; sobe-o no .env se quiseres que acompanhe o saldo)
+    valor = _valor_trade_dinamico(teto_modo=config.SNIPER_RAPIDO_VALOR_USD)
 
     # Limite diario OBRIGATORIO - a principal trava deste modo (verificado
     # ANTES do filtro de qualidade, que e mais lento - nao vale a pena
@@ -676,9 +720,12 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
     if mint in posicoes.listar_posicoes_abertas():
         return
 
+    # Dimensionamento dinamico: % do saldo livre, dentro dos limites
+    valor = _valor_trade_dinamico("bsc", teto_modo=config.BSC_MAX_TRADE_USD)
+
     if config.DRY_RUN:
         import carteira
-        if carteira.saldo_disponivel() < config.BSC_MAX_TRADE_USD:
+        if carteira.saldo_disponivel() < valor:
             return
 
     try:
@@ -686,13 +733,12 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
 
         # Filtro 2: rota de venda viva na PancakeSwap ANTES de comprar
         # (o check mais caro - 3 eth_calls - por isso corre em ultimo)
-        ok_rota, motivo_rota = executor_bsc.verificar_rota_venda(
-            mint, config.BSC_MAX_TRADE_USD)
+        ok_rota, motivo_rota = executor_bsc.verificar_rota_venda(mint, valor)
         if not ok_rota:
             _rejeitar(f"rota de venda: {motivo_rota}")
             return
 
-        r = executor_bsc.comprar_token(mint, simbolo, valor_usd=config.BSC_MAX_TRADE_USD,
+        r = executor_bsc.comprar_token(mint, simbolo, valor_usd=valor,
                                        dex=dados.get("dex"),
                                        liquidez_usd=dados.get("liquidez_usd"),
                                        idade_minutos_compra=dados.get("idade_minutos"))
@@ -752,10 +798,13 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
     if mint in posicoes.listar_posicoes_abertas():
         return
 
+    # Dimensionamento dinamico: % do saldo livre, dentro dos limites
+    valor = _valor_trade_dinamico(teto_modo=config.MAX_TRADE_USD)
+
     # Em dry-run, respeita o saldo virtual disponivel
     if config.DRY_RUN:
         import carteira
-        if carteira.saldo_disponivel() < config.MAX_TRADE_USD:
+        if carteira.saldo_disponivel() < valor:
             alerts.info(
                 f"[yellow]Saldo virtual insuficiente para comprar {simbolo} "
                 f"(disponivel: ${carteira.saldo_disponivel():.2f})[/yellow]"
@@ -766,7 +815,7 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
         preco_sol_usd = obter_preco_sol_usd()
         resultado = executor.comprar_token(
             mint=mint, simbolo=simbolo,
-            valor_usd=config.MAX_TRADE_USD, preco_sol_usd=preco_sol_usd,
+            valor_usd=valor, preco_sol_usd=preco_sol_usd,
             decimais=dados.get("decimais"),
             dex=dados.get("dex"), modo="normal",
             pool_address=dados.get("pool_address"),

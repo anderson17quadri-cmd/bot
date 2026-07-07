@@ -347,6 +347,20 @@ SOLANA_PERMITIR_ENVIO_REAL = _env_texto("SOLANA_PERMITIR_ENVIO_REAL", "false").l
 # dar como "incerta" (nao abre/fecha a posicao sem confirmacao).
 CONFIRMAR_TX_SEGUNDOS = _env_float("CONFIRMAR_TX_SEGUNDOS", 20.0)
 MAX_TRADE_USD = _env_float("MAX_TRADE_USD", 5.0)
+
+# --- Dimensionamento DINAMICO por percentagem do saldo -------------------
+# O valor de cada compra passa a ser TRADE_PCT_SALDO% do saldo livre NO
+# MOMENTO da compra, preso entre TRADE_MIN_USD e TRADE_MAX_USD. Corrige o
+# problema do valor fixo: com $200 de saldo uma posicao de $5 era 2.5%,
+# mas com $20 ja era 25% - cada trade perdedor mordia uma fatia cada vez
+# maior do que restava. Os valores fixos por modo (MAX_TRADE_USD,
+# PUMPFUN_MAX_TRADE_USD, SNIPER_RAPIDO_VALOR_USD, BSC_MAX_TRADE_USD)
+# continuam a valer como TETO de seguranca de cada modo - os executores
+# ja os impoem por dentro; sobe-os no .env se quiseres que um modo
+# acompanhe o intervalo dinamico completo.
+TRADE_PCT_SALDO = _env_float("TRADE_PCT_SALDO", 2.5)
+TRADE_MIN_USD = _env_float("TRADE_MIN_USD", 2.0)
+TRADE_MAX_USD = _env_float("TRADE_MAX_USD", 10.0)
 SCORE_COMPRA_MAX = _env_int("SCORE_COMPRA_MAX", 20)
 # Tokens "fronteira": score acima do limiar de compra mas dentro desta
 # margem NAO sao comprados, mas entram na watchlist para decisao manual
@@ -526,6 +540,7 @@ def limite_sanidade_trade_usd() -> float:
     grandeza, nao para policiar o dia a dia normal do bot."""
     maiores_limites = [
         MAX_TRADE_USD, PUMPFUN_MAX_TRADE_USD, BSC_MAX_TRADE_USD, SNIPER_RAPIDO_VALOR_USD,
+        TRADE_MAX_USD,  # teto do dimensionamento dinamico por % do saldo
     ]
     return max(maiores_limites) * 50
 
