@@ -493,6 +493,21 @@ SNIPER_RAPIDO_SCORE_VENDA_URGENTE = _env_int("SNIPER_RAPIDO_SCORE_VENDA_URGENTE"
 LIQUIDEZ_MINIMA_CAVEIRA_USD = _env_float("LIQUIDEZ_MINIMA_CAVEIRA_USD", 2000.0)
 IDADE_MAXIMA_CAVEIRA_SEGUNDOS = _env_int("IDADE_MAXIMA_CAVEIRA_SEGUNDOS", 60)
 
+# Atraso minimo (segundos) antes de CONFIAR nos dados on-chain (mint/
+# freeze authority) para a checklist do Caveira. Diagnostico real: com
+# deteccao WebSocket (0-2s de vida do token), o RPC ainda nao indexou a
+# conta do mint - getAccountInfo devolve "conta nao existe", o que
+# _passa_checklist_caveira le como onchain_disponivel=False e reprova
+# por fail-closed (comportamento correto, mas desperdicado - nao e um
+# problema real do token, e so o RPC ainda nao ter apanhado o jeito).
+# Se o token for mais novo do que isto, o Caveira AGENDA uma unica
+# retentativa (ver _caveira_pendentes/_reprocessar_caveira_pendentes em
+# main.py) em vez de rejeitar logo - sem sleep bloqueante, o proprio
+# ciclo principal (que corre a cada 2s com WebSocket ativo) reprocessa a
+# fila. Nao consome da janela de IDADE_MAXIMA_CAVEIRA_SEGUNDOS mais do
+# que o necessario: 6-8s costuma ser suficiente para o RPC indexar.
+CAVEIRA_ATRASO_MINIMO_SEGUNDOS = _env_float("CAVEIRA_ATRASO_MINIMO_SEGUNDOS", 6.0)
+
 # --- Filtro de QUALIDADE do Caveira (momentum.py) ----------------------
 # A checklist binaria acima (autoridades+liquidez+idade) filtra scams
 # TECNICOS, mas nao filtra qualidade: a maioria dos tokens do pump.fun
