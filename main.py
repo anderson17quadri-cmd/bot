@@ -577,6 +577,12 @@ def tentar_copy_trade(sinal: dict) -> None:
                 f"(copiou {carteira_seguida[:8]}...)[/bold cyan]"
             )
             _notificar_compra_telegram(f"👥 [COPY de {carteira_seguida[:8]}...] {r['mensagem']}")
+            # Memoria semanal: o copy trade nao tem 'dados' de analise (nao
+            # passa pelo pipeline de pools) - regista com o minimo que sabe,
+            # para TODA a compra real ficar em decisoes.jsonl
+            _registar_decisao_memoria(
+                {"token_simbolo": simbolo, "token_mint": mint, "chain": "solana"},
+                None, "comprado", None, modo="copy_trading")
             return
         alerts.info(f"[yellow][COPY] falha ao comprar {mint[:8]}...: {r.get('mensagem')}[/yellow]")
     except Exception as e:

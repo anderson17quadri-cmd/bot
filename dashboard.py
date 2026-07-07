@@ -884,6 +884,28 @@ def api_comprar():
 
     if resultado.get("sucesso"):
         watchlist.remover(mint)  # comprado -> sai da watchlist (passa a posicao)
+        # Memoria semanal: compras manuais tambem contam como decisao (senao
+        # o token fecha em trades_fechados.jsonl sem nunca ter "comprado" em
+        # decisoes.jsonl). "origem" distingue a decisao HUMANA das compras
+        # automaticas do bot na analise semanal.
+        try:
+            import memoria
+            memoria.registar_decisao({
+                "token": simbolo,
+                "mint": mint,
+                "chain": chain,
+                "modo": "normal",
+                "liquidez_usd": (entrada or {}).get("liquidez_usd"),
+                "idade_s": None,
+                "holder_concentrado_pct": None,
+                "score_ia": (entrada or {}).get("score"),
+                "provider_ia": None,
+                "decisao": "comprado",
+                "motivo_rejeicao": None,
+                "origem": "manual_dashboard",
+            })
+        except Exception as e:
+            print(f"[memoria] falha ao registar compra manual: {e}")
         try:
             import telegram_alerts
             telegram_alerts.enviar(f"✅ COMPRA (manual): {resultado.get('mensagem', '')}")
