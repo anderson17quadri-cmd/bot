@@ -1290,9 +1290,16 @@ def processar_pool(pool: dict) -> None:
     # entra na watchlist para o utilizador decidir manualmente no dashboard
     try:
         score = analise_ia["score_final"]
+        # <= (nao <) no limite inferior: score == SCORE_COMPRA_MAX e um
+        # valor MUITO comum na pratica (ex: score_heuristico = so
+        # PESO_LIQUIDEZ_BAIXA quando onchain_disponivel/holders_disponivel
+        # sao False - default 20, igual ao SCORE_COMPRA_MAX default) - a
+        # condicao estrita excluia sistematicamente esses candidatos da
+        # watchlist, mesmo sendo exatamente o caso "score no limiar" que
+        # a watchlist existe para capturar.
         e_fronteira = (
             config.SCORE_COMPRA_MAX
-            < score
+            <= score
             <= config.SCORE_COMPRA_MAX + config.SCORE_WATCHLIST_MARGEM
         )
         if e_fronteira and not comprado:
