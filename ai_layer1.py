@@ -71,14 +71,31 @@ def _chamar_groq(dados_token: dict) -> dict:
 
     try:
         resposta = requests.post(url, headers=headers, json=payload, timeout=45)
-        resposta.raise_for_status()
+    except Exception as e:
+        raise RuntimeError(f"Falha na chamada a Groq (rede/timeout): {e}") from e
+
+    # Status HTTP SEMPRE no log, antes de parsear - para o bot.log mostrar
+    # de imediato se e rate limit (429), auth (401), creditos, etc.
+    print(f"[Camada 1] Groq HTTP {resposta.status_code}")
+    if resposta.status_code != 200:
+        # O corpo e onde a Groq explica o erro (rate limit, quota, auth) -
+        # nunca o descartar (era o que o raise_for_status fazia)
+        raise RuntimeError(
+            f"Groq devolveu HTTP {resposta.status_code}: {resposta.text[:300]}")
+
+    # Parsing em try proprio: HTTP 200 com corpo inesperado (ex:
+    # {"error": ...}) dava KeyError cuja mensagem era so "'choices'" -
+    # agora o corpo bruto vai inteiro (truncado) para a mensagem de erro
+    try:
         dados = resposta.json()
         texto = dados["choices"][0]["message"].get("content") or ""
     except Exception as e:
-        raise RuntimeError(f"Falha na chamada a Groq: {e}") from e
+        raise RuntimeError(
+            f"Resposta da Groq com formato inesperado ({e!r}). "
+            f"Corpo: {resposta.text[:300]}") from e
 
     if not texto.strip():
-        raise RuntimeError("Groq devolveu 'content' vazio.")
+        raise RuntimeError(f"Groq devolveu 'content' vazio. Corpo: {resposta.text[:300]}")
 
     obj = ai_utils.extrair_json(texto)
     return ai_utils.normalizar_resultado(obj)
@@ -112,7 +129,16 @@ def _chamar_deepseek(dados_token: dict) -> dict:
 
     try:
         resposta = requests.post(url, headers=headers, json=payload, timeout=45)
-        resposta.raise_for_status()
+    except Exception as e:
+        raise RuntimeError(f"Falha na chamada a DeepSeek (rede/timeout): {e}") from e
+
+    # Mesmo padrao da Groq: status sempre no log, corpo nunca descartado
+    print(f"[Camada 1] DeepSeek HTTP {resposta.status_code}")
+    if resposta.status_code != 200:
+        raise RuntimeError(
+            f"DeepSeek devolveu HTTP {resposta.status_code}: {resposta.text[:300]}")
+
+    try:
         dados = resposta.json()
         mensagem = dados["choices"][0]["message"]
         # 'content' e sempre o campo com a resposta final (JSON pedido).
@@ -120,12 +146,14 @@ def _chamar_deepseek(dados_token: dict) -> dict:
         # modelo - nunca o usamos para o parsing.
         texto = mensagem.get("content") or ""
     except Exception as e:
-        raise RuntimeError(f"Falha na chamada a DeepSeek: {e}") from e
+        raise RuntimeError(
+            f"Resposta da DeepSeek com formato inesperado ({e!r}). "
+            f"Corpo: {resposta.text[:300]}") from e
 
     if not texto.strip():
         raise RuntimeError(
             "DeepSeek devolveu 'content' vazio (possivel corte por "
-            "max_tokens durante o raciocinio interno)."
+            f"max_tokens durante o raciocinio interno). Corpo: {resposta.text[:300]}"
         )
 
     obj = ai_utils.extrair_json(texto)
