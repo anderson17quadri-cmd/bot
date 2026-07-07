@@ -58,16 +58,24 @@ DASHBOARD_PASSWORD = _env_texto("DASHBOARD_PASSWORD", "")
 
 
 # ==========================================================================
-# 2) Camada 1 - Groq (PRINCIPAL, rapido) + DeepSeek (fallback)
+# 2) Camada 1 - Groq (PRINCIPAL) + DeepSeek (fallback) + OpenRouter (3a linha)
 # ==========================================================================
 # A Groq tenta primeiro (latencia muito baixa); se falhar (erro, rate
-# limit, timeout) ou nao tiver chave, cai automaticamente para a DeepSeek.
+# limit, timeout) ou nao tiver chave, cai para a DeepSeek; se essa tambem
+# falhar, cai para o OpenRouter (opcional).
 GROQ_API_KEY = _env_texto("GROQ_API_KEY")
 GROQ_MODEL = _env_texto("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 DEEPSEEK_API_KEY = _env_texto("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = _env_texto("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = _env_texto("DEEPSEEK_MODEL", "deepseek-chat")
+
+# 3a linha de fallback (OPCIONAL): OpenRouter da acesso a varios modelos
+# com um so endpoint OpenAI-compatible - incluindo modelos GRATIS (o
+# default aqui e o Gemini 2.0 Flash, mas troca-se so a variavel, sem
+# mexer em codigo, se um tier gratis apertar ou for descontinuado.
+OPENROUTER_API_KEY = _env_texto("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = _env_texto("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
 
 
 # ==========================================================================
@@ -318,13 +326,18 @@ ANALISE_ONCHAIN_AVANCADA = _env_texto("ANALISE_ONCHAIN_AVANCADA", "true").lower(
 # 6) Estado da configuracao (Fase 1)
 # ==========================================================================
 def camada1_configurada() -> bool:
-    """True se pelo menos UM dos dois providers tiver chave (Groq OU
-    DeepSeek) - so precisas de um dos dois para a Camada 1 funcionar."""
-    return bool(GROQ_API_KEY) or bool(DEEPSEEK_API_KEY)
+    """True se pelo menos UM dos tres providers tiver chave (Groq OU
+    DeepSeek OU OpenRouter) - so precisas de um deles para a Camada 1
+    funcionar."""
+    return bool(GROQ_API_KEY) or bool(DEEPSEEK_API_KEY) or bool(OPENROUTER_API_KEY)
 
 
 def groq_configurado() -> bool:
     return bool(GROQ_API_KEY)
+
+
+def openrouter_configurado() -> bool:
+    return bool(OPENROUTER_API_KEY)
 
 
 def camada2_configurada() -> bool:
@@ -554,6 +567,22 @@ def limite_sanidade_trade_usd() -> float:
 PERMITIR_ENVIO_TOKENS = _env_texto("PERMITIR_ENVIO_TOKENS", "false").lower() in ("1", "true", "yes", "sim")
 
 
+def _status_camada1() -> str:
+    """Cadeia de fallback configurada da Camada 1, para o banner de
+    arranque (resumo()). Mostra so os providers com chave, na ordem em
+    que analisar_token() os tenta."""
+    providers = []
+    if GROQ_API_KEY:
+        providers.append(f"Groq ({GROQ_MODEL})")
+    if DEEPSEEK_API_KEY:
+        providers.append(f"DeepSeek ({DEEPSEEK_MODEL})")
+    if OPENROUTER_API_KEY:
+        providers.append(f"OpenRouter ({OPENROUTER_MODEL})")
+    if not providers:
+        return "OFF (sem chave -> usa score heuristico)"
+    return " -> ".join(providers)
+
+
 def resumo() -> str:
     linhas = [
         f"RPC Solana        : {SOLANA_RPC_URL}",
@@ -562,7 +591,7 @@ def resumo() -> str:
         f"Intervalo polling : {POLL_INTERVAL_SEGUNDOS}s",
         f"Zona ambigua      : {ZONA_AMBIGUA_MIN}-{ZONA_AMBIGUA_MAX}",
         f"Liquidez minima   : {LIQUIDEZ_MINIMA_USD:.0f} USD",
-        f"Camada 1 IA       : {'Groq (' + GROQ_MODEL + ') + fallback DeepSeek' if GROQ_API_KEY else ('DeepSeek (' + DEEPSEEK_MODEL + ')' if DEEPSEEK_API_KEY else 'OFF (sem chave -> usa score heuristico)')}",
+        f"Camada 1 IA       : {_status_camada1()}",
         f"Camada 2 Claude   : {'ON (' + ANTHROPIC_MODEL + ')' if camada2_configurada() else 'OFF (opcional)'}",
         f"Fase 2 (trading)  : {'ON, DRY_RUN=' + str(DRY_RUN) if fase2_configurada() else 'OFF (sem WALLET_PRIVATE_KEY)'}",
         f"Envio real Solana : {'PERMITIDO' if SOLANA_PERMITIR_ENVIO_REAL else 'BLOQUEADO (so simula; liga SOLANA_PERMITIR_ENVIO_REAL)'}",

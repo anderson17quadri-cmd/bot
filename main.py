@@ -34,36 +34,60 @@ import momentum
 import telegram_alerts
 
 
+def _resultado_heuristico(dados: dict) -> dict:
+    """Analise 'analise_ia' so com o score heuristico, sem chamar
+    nenhuma IA - mesma forma que avaliar_com_ia devolve, para o resto do
+    pipeline (alertas, radar, watchlist, tentar_comprar) funcionar sem
+    diferenciar se a IA correu ou nao. Usado quando um filtro barato
+    (liquidez, honeypot, taxas, holders, idade) ja reprova o token ANTES
+    de gastar uma chamada de IA - ver _passa_filtros_baratos()."""
+    return {
+        "score_final": dados["score_heuristico"],
+        "fonte_score": "heuristico",
+        # Provider REAL que respondeu (groq/deepseek/openrouter/claude/
+        # heuristico) - para a memoria semanal; "fonte_score" continua a
+        # ser o rotulo de display que o alerts.py ja conhece.
+        "provider_ia": "heuristico",
+        "camada1": None,
+        "camada2": None,
+    }
+
+
+# Nome de display por provider real - "fonte_score" e o rotulo que o
+# alerts.py mostra ("score via X"); antes de existir Groq/OpenRouter
+# ficava sempre hardcoded a "DeepSeek", mesmo quando outro provider e
+# que tinha respondido (bug cosmetico, corrigido aqui).
+_NOMES_DISPLAY_PROVIDER = {
+    "groq": "Groq",
+    "deepseek": "DeepSeek",
+    "openrouter": "OpenRouter",
+    "claude": "Claude",
+    "heuristico": "heuristico",
+}
+
+
 def avaliar_com_ia(dados: dict) -> dict:
     """Decide o score final combinando heuristica + Camada 1 + (talvez) Camada 2.
 
     Devolve o dicionario 'analise_ia' que o alerts.py sabe mostrar:
       {
         "score_final": int,
-        "fonte_score": "heuristico" | "DeepSeek" | "Claude",
+        "fonte_score": "heuristico" | "Groq" | "DeepSeek" | "OpenRouter" | "Claude",
         "camada1": {"score","justificacao"} | None,
         "camada2": {"score","justificacao"} | None,
       }
     """
-    resultado = {
-        "score_final": dados["score_heuristico"],
-        "fonte_score": "heuristico",
-        # Provider REAL que respondeu (groq/deepseek/claude/heuristico) -
-        # para a memoria semanal; "fonte_score" continua a ser o rotulo
-        # de display que o alerts.py ja conhece.
-        "provider_ia": "heuristico",
-        "camada1": None,
-        "camada2": None,
-    }
+    resultado = _resultado_heuristico(dados)
 
-    # ---------- CAMADA 1 (DeepSeek) - corre para TODOS ----------
+    # ---------- CAMADA 1 (Groq/DeepSeek/OpenRouter) - corre para TODOS ----------
     if ai_layer1.esta_configurada():
         try:
             c1 = ai_layer1.analisar_token(dados)
             resultado["camada1"] = c1
             resultado["score_final"] = c1["score"]
-            resultado["fonte_score"] = "DeepSeek"
             resultado["provider_ia"] = c1.get("provider", "deepseek")
+            resultado["fonte_score"] = _NOMES_DISPLAY_PROVIDER.get(
+                resultado["provider_ia"], resultado["provider_ia"])
         except RuntimeError as e:
             alerts.info(f"[yellow]Camada 1 falhou, uso heuristico:[/yellow] {e}")
 
@@ -222,6 +246,104 @@ def _registar_decisao_memoria(dados: dict, analise_ia: dict | None,
         alerts.info(f"[dim][memoria] falha ao registar decisao: {e}[/dim]")
 
 
+# ============================================================================
+# Filtros BARATOS (nao dependem da IA): liquidez, honeypot, taxas, holders,
+# idade minima da curva. Cada um e a UNICA fonte de verdade da sua regra -
+# usados tanto pelo pre-filtro (antes da IA, so para decidir se vale a pena
+# gastar uma chamada) como pelos tentar_comprar_*/curva/bsc (depois da IA,
+# para a rejeicao/registo a serio). Isto evita duplicar limiares em dois
+# sitios que podiam desalinhar-se com o tempo.
+# ============================================================================
+def _filtro_barato_normal(dados: dict) -> tuple[bool, str | None]:
+    """Piso de liquidez do caminho normal (Jupiter)."""
+    liquidez = dados.get("liquidez_usd") or 0.0
+    if liquidez < config.LIQUIDEZ_MINIMA_USD:
+        return False, (f"liquidez ${liquidez:,.0f} < minima "
+                       f"${config.LIQUIDEZ_MINIMA_USD:,.0f}")
+    return True, None
+
+
+def _filtro_barato_curva(dados: dict) -> tuple[bool, str | None]:
+    """Atraso minimo desde o lancamento (caminho bonding curve)."""
+    idade_seg = dados.get("idade_minutos", 0) * 60
+    if idade_seg < config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS:
+        return False, (f"idade {idade_seg:.0f}s < atraso minimo da curva "
+                       f"{config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS}s")
+    return True, None
+
+
+def _filtro_barato_bsc(dados: dict) -> tuple[bool, str | None]:
+    """Liquidez BSC + anti-honeypot + taxas + holders (caminho BSC).
+    NAO inclui a rota de venda (essa precisa de 3 eth_call - fica so no
+    tentar_comprar_bsc, depois da IA, para nao gastar RPC em candidatos
+    que a IA ainda pode rejeitar por outras razoes)."""
+    simbolo = dados.get("token_simbolo", "?")
+    liquidez = dados.get("liquidez_usd") or 0.0
+    if liquidez < config.LIQUIDEZ_MINIMA_BSC_USD:
+        return False, f"liquidez ${liquidez:,.0f} < ${config.LIQUIDEZ_MINIMA_BSC_USD:,.0f} BSC"
+
+    if dados.get("honeypot") is True:
+        return False, "honeypot detectado (simulacao diz que nao deixa vender)"
+    if config.BSC_EXIGIR_ANTI_HONEYPOT:
+        if dados.get("analise_indisponivel"):
+            return False, "anti-honeypot sem resposta (token nao indexado/API em baixo) - fail-closed"
+        sell_tax = dados.get("sell_tax")
+        buy_tax = dados.get("buy_tax")
+        if sell_tax is None:
+            return False, "taxa de venda desconhecida (simulacao incompleta) - fail-closed"
+        if sell_tax > config.BSC_SELL_TAX_MAX_PCT:
+            return False, f"taxa de venda {sell_tax:.1f}% > {config.BSC_SELL_TAX_MAX_PCT:.0f}%"
+        if buy_tax is not None and buy_tax > config.BSC_BUY_TAX_MAX_PCT:
+            return False, f"taxa de compra {buy_tax:.1f}% > {config.BSC_BUY_TAX_MAX_PCT:.0f}%"
+
+    holders_total = dados.get("holders_total")
+    holders_falharam = dados.get("holders_falharam")
+    if (holders_total and holders_total >= 20 and holders_falharam is not None
+            and (holders_falharam / holders_total * 100) > config.BSC_HOLDERS_FALHA_MAX_PCT):
+        return False, (f"{holders_falharam}/{holders_total} holders nao conseguem vender "
+                       f"(> {config.BSC_HOLDERS_FALHA_MAX_PCT:.0f}%)")
+
+    # Concentracao do maior holder - placeholder ate existir fonte de
+    # dados na BSC (holders_disponivel=False). Avisa sempre que e saltado.
+    if dados.get("holders_disponivel"):
+        top_pct = dados.get("top_holder_pct") or 0.0
+        if top_pct > config.BSC_TOP_HOLDER_MAX_PCT:
+            return False, f"holder concentrado {top_pct:.0f}% > {config.BSC_TOP_HOLDER_MAX_PCT:.0f}%"
+    else:
+        alerts.info(f"[dim][BSC] {simbolo}: filtro de holder concentrado IGNORADO - "
+                    f"sem fonte de dados de holders na BSC (ver BSC_TOP_HOLDER_MAX_PCT no config.py)[/dim]")
+
+    return True, None
+
+
+def _passa_filtros_baratos(dados: dict) -> tuple[bool, str | None]:
+    """Decide, ANTES de chamar avaliar_com_ia(), se vale a pena gastar
+    uma chamada de IA (Groq/DeepSeek/OpenRouter) neste token. Corre os
+    MESMOS filtros que tentar_comprar_bsc/curva/normal aplicam depois -
+    se um destes ja reprova, a IA nunca decidiria diferente, so custaria
+    tokens/latencia/quota de rate-limit a toa (diagnostico real: >=10%
+    das chamadas de IA desperdicadas em candidatos assim, sobretudo
+    anti-honeypot sem resposta na BSC).
+
+    So decide SE vale a pena gastar IA - a rejeicao e o registo na
+    memoria semanal continuam a acontecer, como sempre, dentro de
+    tentar_comprar_bsc/curva/normal (usando os MESMOS filtros, por isso
+    o resultado nunca diverge: e so uma questao de QUANDO se descobre).
+
+    Nao mexe em trading desligado (Fase 2/BSC off) - nesse caso a IA
+    continua a correr para todos os tokens, como hoje, porque o modo
+    "so deteccao + analise + alerta" (sem wallet) depende disso."""
+    if not config.fase2_configurada():
+        return True, None
+    if dados.get("chain") == "bsc":
+        if not config.fase2_bsc_configurada():
+            return True, None
+        return _filtro_barato_bsc(dados)
+    if config.PUMPFUN_BONDING_CURVE_ATIVO and _e_pumpfun_curva(dados):
+        return _filtro_barato_curva(dados)
+    return _filtro_barato_normal(dados)
+
+
 def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
     """Tenta comprar um token AINDA na bonding curve do pump.fun.
 
@@ -251,15 +373,11 @@ def tentar_comprar_curva(dados: dict, analise_ia: dict) -> bool:
                                   modo="bonding_curve")
         return True  # era candidato de curva, mas rejeitado: NAO cai no fluxo normal
 
-    # Atraso minimo: usa a idade do pool como proxy do tempo desde o lancamento
-    idade_seg = dados.get("idade_minutos", 0) * 60
-    if idade_seg < config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS:
-        alerts.info(
-            f"[dim][curva] {simbolo} demasiado recente "
-            f"({idade_seg:.0f}s < {config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS}s) - espera[/dim]"
-        )
-        _registar_decisao_memoria(dados, analise_ia, "rejeitado",
-                                  f"idade {idade_seg:.0f}s < atraso minimo da curva",
+    # Atraso minimo (helper partilhado com o pre-filtro - ver _filtro_barato_curva)
+    ok_idade, motivo_idade = _filtro_barato_curva(dados)
+    if not ok_idade:
+        alerts.info(f"[dim][curva] {simbolo} {motivo_idade} - espera[/dim]")
+        _registar_decisao_memoria(dados, analise_ia, "rejeitado", motivo_idade,
                                   modo="bonding_curve")
         return True
 
@@ -660,62 +778,12 @@ def tentar_comprar_bsc(dados: dict, analise_ia: dict) -> None:
         _rejeitar(f"score IA {score} > {config.SCORE_COMPRA_MAX}")
         return
 
-    # Filtro 5: liquidez minima PROPRIA da BSC (mais alta que a generica -
-    # pool PancakeSwap com liquidez fina e quase sempre rug descartavel)
-    liquidez = dados.get("liquidez_usd") or 0.0
-    if liquidez < config.LIQUIDEZ_MINIMA_BSC_USD:
-        _rejeitar(f"liquidez ${liquidez:,.0f} < ${config.LIQUIDEZ_MINIMA_BSC_USD:,.0f} BSC")
+    # Filtros 1, 3, 4a, 4b, 5 (helper partilhado com o pre-filtro - ver
+    # _filtro_barato_bsc: liquidez, anti-honeypot, taxas, holders)
+    ok_barato, motivo_barato = _filtro_barato_bsc(dados)
+    if not ok_barato:
+        _rejeitar(motivo_barato)
         return
-
-    # Filtro 1: anti-honeypot FAIL-CLOSED. honeypot=True bloqueia SEMPRE
-    # (independentemente do toggle); sem confirmacao (API em baixo ou
-    # token ainda nao indexado - o caso tipico dos scams com minutos de
-    # vida), so compra se o utilizador desligar explicitamente a exigencia.
-    if dados.get("honeypot") is True:
-        _rejeitar("honeypot detectado (simulacao diz que nao deixa vender)")
-        return
-    if config.BSC_EXIGIR_ANTI_HONEYPOT:
-        if dados.get("analise_indisponivel"):
-            _rejeitar("anti-honeypot sem resposta (token nao indexado/API em baixo) - fail-closed")
-            return
-        # Filtro 3: teto de taxas. Taxa desconhecida com a exigencia ligada
-        # = nao confirmado = nao compra (fail-closed, como pedido).
-        sell_tax = dados.get("sell_tax")
-        buy_tax = dados.get("buy_tax")
-        if sell_tax is None:
-            _rejeitar("taxa de venda desconhecida (simulacao incompleta) - fail-closed")
-            return
-        if sell_tax > config.BSC_SELL_TAX_MAX_PCT:
-            _rejeitar(f"taxa de venda {sell_tax:.1f}% > {config.BSC_SELL_TAX_MAX_PCT:.0f}%")
-            return
-        if buy_tax is not None and buy_tax > config.BSC_BUY_TAX_MAX_PCT:
-            _rejeitar(f"taxa de compra {buy_tax:.1f}% > {config.BSC_BUY_TAX_MAX_PCT:.0f}%")
-            return
-
-    # Filtro 4a: holders que a Honeypot.is viu FALHAREM a venda (honeypot
-    # "parcial"/blacklist seletiva) - so avalia com amostra minima (>= 20)
-    holders_total = dados.get("holders_total")
-    holders_falharam = dados.get("holders_falharam")
-    if (holders_total and holders_total >= 20 and holders_falharam is not None
-            and (holders_falharam / holders_total * 100) > config.BSC_HOLDERS_FALHA_MAX_PCT):
-        _rejeitar(f"{holders_falharam}/{holders_total} holders nao conseguem vender "
-                  f"(> {config.BSC_HOLDERS_FALHA_MAX_PCT:.0f}%)")
-        return
-
-    # Filtro 4b: concentracao do maior holder (20% na BSC, mais apertado
-    # que os 30% da Solana). NOTA: o analyzer_bsc ainda nao tem fonte de
-    # dados de concentracao (holders_disponivel=False na BSC) - este
-    # filtro fica pronto e ativa sozinho se/quando essa fonte existir.
-    # Ate la, avisa SEMPRE no log que foi saltado, para ninguem assumir
-    # que esta a proteger quando nao esta.
-    if dados.get("holders_disponivel"):
-        top_pct = dados.get("top_holder_pct") or 0.0
-        if top_pct > config.BSC_TOP_HOLDER_MAX_PCT:
-            _rejeitar(f"holder concentrado {top_pct:.0f}% > {config.BSC_TOP_HOLDER_MAX_PCT:.0f}%")
-            return
-    else:
-        alerts.info(f"[dim][BSC] {simbolo}: filtro de holder concentrado IGNORADO - "
-                    f"sem fonte de dados de holders na BSC (ver BSC_TOP_HOLDER_MAX_PCT no config.py)[/dim]")
 
     if mint in posicoes.listar_posicoes_abertas():
         return
@@ -774,21 +842,18 @@ def tentar_comprar(dados: dict, analise_ia: dict) -> None:
                                   f"score IA {score} > {config.SCORE_COMPRA_MAX}")
         return  # risco demasiado alto, nao compra
 
-    # Piso de liquidez no caminho NORMAL: so compra por aqui um token com
-    # liquidez real conhecida. Sem isto, o BONUS de "LP bloqueado" do
-    # pump.fun (-20) cancelava a penalizacao de liquidez baixa (+20), dando
-    # score 0 e comprando tokens com liquidez $0/desconhecida (observado ao
-    # vivo). Tokens pump.fun recem-nascidos sao para o modo bonding curve
-    # (que le a curva on-chain), nao para este caminho.
-    liquidez = dados.get("liquidez_usd") or 0.0
-    if liquidez < config.LIQUIDEZ_MINIMA_USD:
-        alerts.info(
-            f"[dim]{dados['token_simbolo']}: liquidez ${liquidez:,.0f} < minima "
-            f"${config.LIQUIDEZ_MINIMA_USD:,.0f} - nao compra no caminho normal[/dim]"
-        )
-        _registar_decisao_memoria(dados, analise_ia, "rejeitado",
-                                  f"liquidez ${liquidez:,.0f} < minima "
-                                  f"${config.LIQUIDEZ_MINIMA_USD:,.0f}")
+    # Piso de liquidez no caminho NORMAL (helper partilhado com o
+    # pre-filtro - ver _filtro_barato_normal). Sem isto, o BONUS de "LP
+    # bloqueado" do pump.fun (-20) cancelava a penalizacao de liquidez
+    # baixa (+20), dando score 0 e comprando tokens com liquidez
+    # $0/desconhecida (observado ao vivo). Tokens pump.fun recem-nascidos
+    # sao para o modo bonding curve (que le a curva on-chain), nao para
+    # este caminho.
+    ok_liquidez, motivo_liquidez = _filtro_barato_normal(dados)
+    if not ok_liquidez:
+        alerts.info(f"[dim]{dados['token_simbolo']}: {motivo_liquidez} - "
+                    f"nao compra no caminho normal[/dim]")
+        _registar_decisao_memoria(dados, analise_ia, "rejeitado", motivo_liquidez)
         return
 
     mint = dados["token_mint"]
@@ -1183,7 +1248,22 @@ def processar_pool(pool: dict) -> None:
     # heuristico (dados["score_heuristico"]), nunca a IA.
     tentar_comprar_sniper_rapido(dados)
 
-    analise_ia = avaliar_com_ia(dados)
+    # Filtros baratos (liquidez, honeypot, taxas, holders, idade) ANTES da
+    # IA: se ja sabemos que o token vai ser rejeitado por um destes, nao
+    # vale a pena gastar uma chamada de IA (Groq/DeepSeek/OpenRouter) -
+    # diagnostico real confirmou >=10% das chamadas desperdicadas assim.
+    # A rejeicao "a serio" (com registo na memoria semanal) continua a
+    # acontecer dentro de tentar_comprar - aqui so decidimos se poupamos
+    # a chamada de IA; o resultado da compra nunca muda.
+    pre_ok, pre_motivo = _passa_filtros_baratos(dados)
+    if pre_ok:
+        analise_ia = avaliar_com_ia(dados)
+    else:
+        analise_ia = _resultado_heuristico(dados)
+        alerts.info(
+            f"[dim]{dados['token_simbolo']}: reprovado num filtro barato "
+            f"({pre_motivo}) - poupa a chamada de IA[/dim]"
+        )
     alerts.mostrar_alerta(dados, analise_ia)
     tentar_comprar(dados, analise_ia)
 

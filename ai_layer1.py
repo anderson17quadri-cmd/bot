@@ -1,14 +1,16 @@
 """
-ai_layer1.py  -  CAMADA 1 (Groq principal + DeepSeek fallback)
+ai_layer1.py  -  CAMADA 1 (Groq -> DeepSeek -> OpenRouter, em cadeia)
 ====================================
 Analise PRIMARIA. Corre para TODOS os tokens detetados. Deve ser rapida e
 barata. Recebe os dados on-chain e devolve {"score": int, "justificacao": str}.
 
-Tenta primeiro a Groq (latencia muito baixa); se falhar por qualquer razao
-(erro, rate limit, timeout, sem chave), cai para a DeepSeek. So levanta
-RuntimeError se AMBAS falharem (ou nenhuma estiver configurada).
+Tenta a Groq primeiro (latencia muito baixa); se falhar por qualquer razao
+(erro, rate limit, timeout, sem chave), cai para a DeepSeek; se essa
+tambem falhar, cai para o OpenRouter (opcional - da acesso a modelos
+gratis como o Gemini Flash com o mesmo formato OpenAI-compatible). So
+levanta RuntimeError se TODOS falharem (ou nenhum estiver configurado).
 
-Chamamos os dois endpoints diretamente com 'requests' (em vez do cliente
+Chamamos os tres endpoints diretamente com 'requests' (em vez do cliente
 'openai') - mais leve, evita problemas de compilacao, e da-nos controlo
 total sobre como lemos a resposta (importante porque modelos como o
 deepseek-v4-pro podem incluir um campo extra 'reasoning_content' com o
@@ -35,14 +37,19 @@ SYSTEM_PROMPT = (
 
 
 def esta_configurada() -> bool:
-    """True se houver chave de algum dos dois providers (Groq ou
-    DeepSeek) no .env."""
+    """True se houver chave de algum dos tres providers (Groq, DeepSeek
+    ou OpenRouter) no .env."""
     return config.camada1_configurada()
 
 
 def groq_configurado() -> bool:
     """True se houver chave da Groq no .env."""
     return config.groq_configurado()
+
+
+def openrouter_configurado() -> bool:
+    """True se houver chave do OpenRouter no .env."""
+    return config.openrouter_configurado()
 
 
 def _chamar_groq(dados_token: dict) -> dict:
@@ -160,35 +167,92 @@ def _chamar_deepseek(dados_token: dict) -> dict:
     return ai_utils.normalizar_resultado(obj)
 
 
-def analisar_token(dados_token: dict) -> dict:
-    """Tenta a Groq primeiro (mais rapida); se falhar, cai para a DeepSeek.
+def _chamar_openrouter(dados_token: dict) -> dict:
+    """Envia os dados ao OpenRouter (endpoint OpenAI-compatible, da acesso
+    a varios modelos com uma so chave - default Gemini 2.0 Flash, tier
+    gratis) e devolve {"score": int, "justificacao": str}. Mesmo padrao
+    de erro das outras duas: status sempre no log, corpo nunca
+    descartado. Levanta RuntimeError em falha."""
+    if not openrouter_configurado():
+        raise RuntimeError("OpenRouter sem chave de API configurada.")
 
-    So levanta RuntimeError se AMBAS falharem (ou nenhuma estiver
-    configurada) - o main.py apanha esse erro e continua com o score
-    heuristico, tal como hoje.
-    """
-    erro_groq = None
-    if groq_configurado():
-        try:
-            resultado = _chamar_groq(dados_token)
-            resultado["provider"] = "groq"
-            print(f"[Camada 1] provider usado: Groq ({config.GROQ_MODEL})")
-            return resultado
-        except Exception as e:
-            erro_groq = e
-            print(f"[Camada 1] Groq falhou ({e}) - a tentar DeepSeek...")
+    prompt_utilizador = ai_utils.construir_prompt(dados_token)
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {config.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config.OPENROUTER_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt_utilizador},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 2000,
+        "response_format": {"type": "json_object"},
+    }
 
     try:
-        resultado = _chamar_deepseek(dados_token)
-        resultado["provider"] = "deepseek"
-        print(f"[Camada 1] provider usado: DeepSeek ({config.DEEPSEEK_MODEL})")
-        return resultado
+        resposta = requests.post(url, headers=headers, json=payload, timeout=45)
     except Exception as e:
-        if erro_groq is not None:
-            raise RuntimeError(
-                f"Groq e DeepSeek falharam. Groq: {erro_groq}. DeepSeek: {e}"
-            ) from e
-        raise
+        raise RuntimeError(f"Falha na chamada ao OpenRouter (rede/timeout): {e}") from e
+
+    print(f"[Camada 1] OpenRouter HTTP {resposta.status_code}")
+    if resposta.status_code != 200:
+        raise RuntimeError(
+            f"OpenRouter devolveu HTTP {resposta.status_code}: {resposta.text[:300]}")
+
+    try:
+        dados = resposta.json()
+        texto = dados["choices"][0]["message"].get("content") or ""
+    except Exception as e:
+        raise RuntimeError(
+            f"Resposta do OpenRouter com formato inesperado ({e!r}). "
+            f"Corpo: {resposta.text[:300]}") from e
+
+    if not texto.strip():
+        raise RuntimeError(f"OpenRouter devolveu 'content' vazio. Corpo: {resposta.text[:300]}")
+
+    obj = ai_utils.extrair_json(texto)
+    return ai_utils.normalizar_resultado(obj)
+
+
+# Cadeia de fallback, na ordem que analisar_token() tenta. Cada entrada:
+# (funcao, nome para o log/registo, se esta configurada agora)
+def _providers_configurados():
+    return [
+        (_chamar_groq, "groq", groq_configurado()),
+        (_chamar_deepseek, "deepseek", bool(config.DEEPSEEK_API_KEY)),
+        (_chamar_openrouter, "openrouter", openrouter_configurado()),
+    ]
+
+
+def analisar_token(dados_token: dict) -> dict:
+    """Tenta cada provider CONFIGURADO na ordem Groq -> DeepSeek ->
+    OpenRouter; devolve o resultado do primeiro que funcionar.
+
+    So levanta RuntimeError se TODOS os configurados falharem (ou
+    nenhum estiver configurado) - o main.py apanha esse erro e continua
+    com o score heuristico, tal como hoje.
+    """
+    erros = []
+    for chamar, nome, configurado in _providers_configurados():
+        if not configurado:
+            continue
+        try:
+            resultado = chamar(dados_token)
+            resultado["provider"] = nome
+            print(f"[Camada 1] provider usado: {nome}")
+            return resultado
+        except Exception as e:
+            erros.append(f"{nome}: {e}")
+            print(f"[Camada 1] {nome} falhou ({e}) - a tentar o proximo provider...")
+
+    if erros:
+        raise RuntimeError("Todos os providers da Camada 1 falharam. " + " | ".join(erros))
+    raise RuntimeError("Camada 1 sem nenhum provider configurado (Groq/DeepSeek/OpenRouter).")
 
 
 # --------------------------------------------------------------------------
