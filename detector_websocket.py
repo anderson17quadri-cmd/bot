@@ -135,12 +135,25 @@ class DetectorWebsocket:
         self._thread.start()
 
     def _loop(self) -> None:
-        """Liga, subscreve e recebe. Reconecta com backoff se cair."""
+        """Liga, subscreve e recebe. Reconecta com backoff se cair; se o
+        RPC rejeitar repetidamente com 429 (limite da conta, nao uma
+        queda transitoria), entra em circuit breaker - ver config.py
+        WS_CIRCUIT_BREAKER_FALHAS/COOLDOWN_SEGUNDOS."""
+        from websockets.exceptions import InvalidStatus
         from websockets.sync.client import connect
+        import rpc
 
         espera_reconexao = 1.0
+        falhas_429_seguidas = 0
         while not self._parar.is_set():
             try:
+                # Antes de CADA tentativa de ligacao (nao so das chamadas
+                # REST): o rate limit do Helius e por API-key/gateway, o
+                # handshake HTTP do WebSocket conta para o MESMO orcamento
+                # das chamadas rpc_call() - sem isto, uma tempestade de
+                # reconexoes WS podia consumir o orcamento que o analyzer/
+                # momentum precisam, e vice-versa.
+                rpc.esperar_pela_vez()
                 with connect(_url_websocket(), open_timeout=15) as ws:
                     # Subscreve aos logs que mencionam o programa do pump.fun.
                     # commitment "processed" = o mais rapido a avisar (menos
@@ -152,15 +165,39 @@ class DetectorWebsocket:
                         '{"commitment":"processed"}]}'
                     )
                     espera_reconexao = 1.0  # ligou -> reset do backoff
+                    falhas_429_seguidas = 0  # ligou -> reset do circuit breaker
                     print(f"[detector_ws] ligado ({_url_websocket()[:40]}...), a ouvir criacoes pump.fun")
 
                     for mensagem in ws:  # bloqueia a receber notificacoes
                         if self._parar.is_set():
                             break
                         self._tratar_mensagem(mensagem)
+            except InvalidStatus as e:
+                if self._parar.is_set():
+                    break
+                if e.response.status_code == 429:
+                    falhas_429_seguidas += 1
+                    if falhas_429_seguidas >= config.WS_CIRCUIT_BREAKER_FALHAS:
+                        print(
+                            f"[detector_ws] {falhas_429_seguidas} rejeicoes 429 SEGUIDAS - "
+                            f"isto parece um limite PERSISTENTE da conta Helius, nao uma "
+                            f"queda transitoria. A pausar {config.WS_CIRCUIT_BREAKER_COOLDOWN_SEGUNDOS:.0f}s "
+                            f"antes de tentar de novo (a deteccao por polling, se ativa, "
+                            f"continua normal entretanto). Se isto se repetir sempre, "
+                            f"confirma no dashboard da Helius se o teu plano tem WebSocket/"
+                            f"logsSubscribe incluido, ou considera METODO_DETECCAO=polling."
+                        )
+                        time.sleep(config.WS_CIRCUIT_BREAKER_COOLDOWN_SEGUNDOS)
+                        falhas_429_seguidas = 0
+                        espera_reconexao = 1.0
+                        continue
+                print(f"[detector_ws] ligacao caiu ({e}); a reconectar em {espera_reconexao:.0f}s")
+                time.sleep(espera_reconexao)
+                espera_reconexao = min(espera_reconexao * 2, 30)  # backoff ate 30s
             except Exception as e:
                 if self._parar.is_set():
                     break
+                falhas_429_seguidas = 0  # nao e um 429 - nao conta para o circuit breaker
                 print(f"[detector_ws] ligacao caiu ({e}); a reconectar em {espera_reconexao:.0f}s")
                 time.sleep(espera_reconexao)
                 espera_reconexao = min(espera_reconexao * 2, 30)  # backoff ate 30s

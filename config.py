@@ -130,6 +130,20 @@ SOLANA_WS_URL = _env_texto("SOLANA_WS_URL", "")
 # nunca ultrapassar o plano gratuito do Helius. Pedidos por segundo max.
 RPC_MAX_PEDIDOS_POR_SEGUNDO = _env_float("RPC_MAX_PEDIDOS_POR_SEGUNDO", 8.0)
 
+# --- Circuit breaker do WebSocket (detector_websocket.py) --------------
+# O backoff exponencial normal (1,2,4,8,16,30s, satura em 30s) trata bem
+# uma queda transitoria - mas se o RPC estiver a rejeitar por um limite
+# PERSISTENTE da conta (ex: 429 repetido), continuar a bater a cada 30s
+# para sempre so desperdica orcamento de rate-limit e enche o log. Apos
+# WS_CIRCUIT_BREAKER_FALHAS 429 CONSECUTIVOS (outros erros de rede nao
+# contam - so rejeicoes explicitas do servidor), o detector para de
+# tentar durante WS_CIRCUIT_BREAKER_COOLDOWN_SEGUNDOS antes de tentar de
+# novo. A deteccao por polling (se METODO_DETECCAO a incluir, o
+# recomendado) continua a funcionar normalmente durante o cooldown - so
+# se perde a vantagem de latencia do WebSocket, nao a deteccao em si.
+WS_CIRCUIT_BREAKER_FALHAS = _env_int("WS_CIRCUIT_BREAKER_FALHAS", 5)
+WS_CIRCUIT_BREAKER_COOLDOWN_SEGUNDOS = _env_float("WS_CIRCUIT_BREAKER_COOLDOWN_SEGUNDOS", 300.0)
+
 # --- Otimizacoes de execucao -------------------------------------------
 # Cache do preco do SOL (segundos). O preco quase nao mexe em poucos
 # segundos, mas obter_preco_sol_usd() e chamado em cada compra (caminho

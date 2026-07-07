@@ -57,9 +57,22 @@ ESPERA_BASE = 1.5  # segundos (vai crescendo: 1.5, 3, 6, ...)
 # Caveira rejeitados por "dados on-chain indisponiveis" causados por 429
 # persistente mesmo com retry). Taxa configuravel no .env
 # (RPC_MAX_PEDIDOS_POR_SEGUNDO, default 8 - conservador para o plano
-# gratuito da Helius, que aguenta ~10/s). Thread-safe: o websocket e o
-# copy trading correm em threads proprias e partilham este mesmo balde.
+# gratuito da Helius, que aguenta ~10/s). Thread-safe: o copy trading e
+# o detector_websocket.py correm em threads proprias e partilham este
+# mesmo balde (via esperar_pela_vez(), abaixo).
 _limitador_global = rate_limiter.RateLimiter(config.RPC_MAX_PEDIDOS_POR_SEGUNDO)
+
+
+def esperar_pela_vez() -> None:
+    """Bloqueia ate haver uma vaga no limitador GLOBAL de pedidos - usado
+    tambem pelo detector_websocket.py antes de CADA tentativa de ligacao
+    (nao so no envio de mensagens). Motivo: o rate limit do Helius e
+    aplicado ao nivel da API-key/gateway, contando o handshake HTTP de
+    uma ligacao WebSocket contra o MESMO orcamento das chamadas REST -
+    sem isto, uma tempestade de reconexoes WS podia consumir o orcamento
+    que os pedidos REST (analyzer, momentum/caveira) precisam, e
+    vice-versa."""
+    _limitador_global.adquirir()
 
 
 def rpc_call(method: str, params: list, timeout: int = 15, tentativas: int = MAX_TENTATIVAS) -> dict:
