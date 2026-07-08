@@ -22,11 +22,19 @@ Ficheiro local: carteira.json
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 
 import config
 
 FICHEIRO_CARTEIRA = "carteira.json"
+
+# Mesma razao do _lock em posicoes.py: desde que a retentativa do Caveira
+# passou a correr na sua propria thread (main.py:_loop_retentativas_caveira),
+# ha mais que uma thread capaz de debitar/creditar o saldo virtual ao
+# mesmo tempo - sem lock, um "carregar, alterar, guardar" concorrente
+# podia perder a escrita do outro (saldo incorreto, sem erro nenhum).
+_lock = threading.Lock()
 
 
 def _carregar() -> dict:
@@ -115,24 +123,25 @@ def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
     if not _sanidade_ok(valor_usd, "compra", simbolo):
         return False
 
-    dados = _carregar()
-    if dados["saldo_atual_usd"] < valor_usd:
-        return False
+    with _lock:
+        dados = _carregar()
+        if dados["saldo_atual_usd"] < valor_usd:
+            return False
 
-    dados["saldo_atual_usd"] -= valor_usd
-    dados["historico"].append({
-        "tipo": "compra", "simbolo": simbolo, "valor_usd": valor_usd,
-        "mint": mint, "chain": chain, "dex": dex, "modo": modo,
-        "preco_unitario_usd": preco_unitario_usd,
-        "quantidade_tokens": quantidade_tokens,
-        "liquidez_usd": liquidez_usd,
-        "idade_minutos_compra": idade_minutos_compra,
-        "top_holder_pct": top_holder_pct,
-        "holders_disponivel": holders_disponivel,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
-    _guardar(dados)
-    return True
+        dados["saldo_atual_usd"] -= valor_usd
+        dados["historico"].append({
+            "tipo": "compra", "simbolo": simbolo, "valor_usd": valor_usd,
+            "mint": mint, "chain": chain, "dex": dex, "modo": modo,
+            "preco_unitario_usd": preco_unitario_usd,
+            "quantidade_tokens": quantidade_tokens,
+            "liquidez_usd": liquidez_usd,
+            "idade_minutos_compra": idade_minutos_compra,
+            "top_holder_pct": top_holder_pct,
+            "holders_disponivel": holders_disponivel,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        _guardar(dados)
+        return True
 
 
 def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd: float,
@@ -169,21 +178,22 @@ def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd:
     if modo is None:
         modo = "sniper_rapido" if sniper_rapido else "normal"
 
-    dados = _carregar()
-    lucro = valor_recebido_usd - valor_investido_usd
-    dados["saldo_atual_usd"] += valor_recebido_usd
-    dados["historico"].append({
-        "tipo": "venda", "simbolo": simbolo,
-        "valor_usd": valor_recebido_usd, "lucro_usd": round(lucro, 4),
-        "mint": mint, "chain": chain, "dex": dex, "modo": modo,
-        "preco_compra_usd": preco_compra_usd,
-        "preco_venda_usd": preco_venda_usd,
-        "quantidade_tokens": quantidade_tokens,
-        "sniper_rapido": sniper_rapido,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
-    _guardar(dados)
-    return True
+    with _lock:
+        dados = _carregar()
+        lucro = valor_recebido_usd - valor_investido_usd
+        dados["saldo_atual_usd"] += valor_recebido_usd
+        dados["historico"].append({
+            "tipo": "venda", "simbolo": simbolo,
+            "valor_usd": valor_recebido_usd, "lucro_usd": round(lucro, 4),
+            "mint": mint, "chain": chain, "dex": dex, "modo": modo,
+            "preco_compra_usd": preco_compra_usd,
+            "preco_venda_usd": preco_venda_usd,
+            "quantidade_tokens": quantidade_tokens,
+            "sniper_rapido": sniper_rapido,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        _guardar(dados)
+        return True
 
 
 def marcar_ultima_compra(mint: str, **campos) -> None:
@@ -192,12 +202,13 @@ def marcar_ultima_compra(mint: str, **campos) -> None:
     (ex: sniper_rapido.py) que reutilizam o executor.comprar_token
     partilhado mas querem marcar a origem SO no seu proprio codigo, sem
     mexer na assinatura da funcao de compra partilhada."""
-    dados = _carregar()
-    for h in reversed(dados["historico"]):
-        if h.get("tipo") == "compra" and h.get("mint") == mint:
-            h.update(campos)
-            _guardar(dados)
-            return
+    with _lock:
+        dados = _carregar()
+        for h in reversed(dados["historico"]):
+            if h.get("tipo") == "compra" and h.get("mint") == mint:
+                h.update(campos)
+                _guardar(dados)
+                return
 
 
 def remover_do_historico(timestamp: str) -> bool:
@@ -207,13 +218,14 @@ def remover_do_historico(timestamp: str) -> bool:
     NAO mexe no saldo: e so limpeza visual do historico, a pedido do
     utilizador. Devolve True se removeu algo, False se nao encontrou.
     """
-    dados = _carregar()
-    antes = len(dados["historico"])
-    dados["historico"] = [h for h in dados["historico"] if h.get("timestamp") != timestamp]
-    if len(dados["historico"]) == antes:
-        return False  # nao encontrou nenhuma entrada com esse timestamp
-    _guardar(dados)
-    return True
+    with _lock:
+        dados = _carregar()
+        antes = len(dados["historico"])
+        dados["historico"] = [h for h in dados["historico"] if h.get("timestamp") != timestamp]
+        if len(dados["historico"]) == antes:
+            return False  # nao encontrou nenhuma entrada com esse timestamp
+        _guardar(dados)
+        return True
 
 
 def relatorio(valor_posicoes_abertas_usd: float = 0.0) -> str:

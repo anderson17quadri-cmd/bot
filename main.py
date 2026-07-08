@@ -16,6 +16,7 @@ Correr:  python main.py     (Ctrl+C para parar)
 """
 
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -31,6 +32,7 @@ import radar
 import watchlist
 import cooldown
 import momentum
+import rpc
 import telegram_alerts
 
 
@@ -464,7 +466,9 @@ def _passa_checklist_caveira(dados: dict) -> tuple[bool, str]:
     este modo so entra quando tem a certeza que as autoridades estao ok.
     """
     if not dados.get("onchain_disponivel"):
-        return False, "dados on-chain indisponiveis (nao da para confirmar autoridades)"
+        motivo = dados.get("onchain_motivo_indisponivel")
+        detalhe = _MOTIVOS_ONCHAIN_INDISPONIVEL.get(motivo, "motivo nao registado")
+        return False, f"dados on-chain indisponiveis ({detalhe})"
     if dados.get("mint_authority") is not None:
         return False, "mint authority ATIVA (podem imprimir mais tokens)"
     if dados.get("freeze_authority") is not None:
@@ -569,7 +573,35 @@ def _passa_filtro_qualidade_caveira(dados: dict) -> tuple[bool, str]:
 # So em memoria (perde-se num restart - aceitavel, e so uma janela de
 # poucos segundos). Ver tentar_comprar_sniper_rapido() e
 # _reprocessar_caveira_pendentes().
+#
+# DIAGNOSTICO REAL (token CWC, 2026-07): uma retentativa agendada para
+# ~40s so foi processada ~10 MINUTOS depois. Causa confirmada por leitura
+# do codigo: _reprocessar_caveira_pendentes() so corria 1x por volta do
+# ciclo principal (main.py, dentro do "while True"), e o ciclo NAO tem
+# duracao fixa - com POLL_INTERVAL_SEGUNDOS a regular so a PAUSA entre
+# ciclos, nao o que acontece DENTRO de um (ate MAX_ANALISES_POR_CICLO
+# tokens, cada um com varias chamadas RPC com retries/backoff ate ~22.5s
+# cada em caso de 429, mais o sleep de CAVEIRA_JANELA_MOMENTUM_SEGUNDOS
+# por candidato do Caveira, mais verificar_posicoes()/reavaliar_watchlist()
+# no fim). Um RPC publico sob carga facilmente estica isso a minutos.
+#
+# CORRIGIDO: a fila passou a ter uma thread dedicada
+# (_loop_retentativas_caveira, arrancada em main()) que a revisita a cada
+# _INTERVALO_RETENTATIVA_CAVEIRA_SEGUNDOS segundos, SEMPRE - independente
+# de quanto o ciclo principal demorar. O lock protege o dict (agora
+# escrito pela thread principal e lido/esvaziado pela thread de
+# retentativas); ver tambem os locks novos em posicoes.py/carteira.py/
+# sniper_rapido.py - com uma 2a thread capaz de comprar a serio, essas
+# escritas deixaram de ser seguras sem eles.
 _caveira_pendentes: dict[str, dict] = {}
+_lock_caveira_pendentes = threading.Lock()
+
+# Cadencia da thread de retentativas - independente de POLL_INTERVAL_
+# SEGUNDOS/METODO_DETECCAO de proposito (essa e a falha que causou o
+# atraso de 10 minutos: a retentativa dependia da cadencia do ciclo
+# principal). 2s cobre CAVEIRA_ATRASO_MINIMO_SEGUNDOS (default 6s) em
+# poucas voltas, sem gastar CPU a verificar uma fila tipicamente vazia.
+_INTERVALO_RETENTATIVA_CAVEIRA_SEGUNDOS = 2.0
 
 
 def tentar_comprar_sniper_rapido(dados: dict) -> bool:
@@ -607,24 +639,27 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     # do mint, o que faz onchain_disponivel vir False so por timing, nao
     # por o token ter algum problema real. Em vez de rejeitar logo,
     # agenda-se UMA retentativa depois de CAVEIRA_ATRASO_MINIMO_SEGUNDOS -
-    # sem sleep bloqueante: o ciclo principal (2s com WebSocket ativo)
-    # reprocessa a fila em _reprocessar_caveira_pendentes(). O marcador
-    # "_caveira_retentativa" evita reagendar outra vez se a 1a
-    # retentativa ainda vier sem dados (nesse caso ja e um "nao consigo
-    # mesmo", nao um problema de timing - reprova como sempre).
+    # processada pela thread dedicada _loop_retentativas_caveira (nao
+    # pelo ciclo principal - ver o aviso junto de _caveira_pendentes mais
+    # acima). O marcador "_caveira_retentativa" evita reagendar outra vez
+    # se a 1a retentativa ainda vier sem dados (nesse caso ja e um "nao
+    # consigo mesmo", nao um problema de timing - reprova como sempre).
     idade_seg = dados.get("idade_minutos", 0) * 60
     if (not dados.get("onchain_disponivel")
             and idade_seg < config.CAVEIRA_ATRASO_MINIMO_SEGUNDOS
-            and not dados.get("_caveira_retentativa")
-            and mint not in _caveira_pendentes):
-        _caveira_pendentes[mint] = {"dados": dados, "detectado_em": time.monotonic()}
-        alerts.info(
-            f"[dim][💀 sniper] {simbolo} ainda sem dados on-chain aos "
-            f"{idade_seg:.1f}s de vida - agendada 1 retentativa em "
-            f"~{config.CAVEIRA_ATRASO_MINIMO_SEGUNDOS:.0f}s (RPC pode nao ter "
-            f"indexado a conta ainda)[/dim]"
-        )
-        return False
+            and not dados.get("_caveira_retentativa")):
+        with _lock_caveira_pendentes:
+            ja_agendado = mint in _caveira_pendentes
+            if not ja_agendado:
+                _caveira_pendentes[mint] = {"dados": dados, "detectado_em": time.monotonic()}
+        if not ja_agendado:
+            alerts.info(
+                f"[dim][💀 sniper] {simbolo} ainda sem dados on-chain aos "
+                f"{idade_seg:.1f}s de vida - agendada 1 retentativa em "
+                f"~{config.CAVEIRA_ATRASO_MINIMO_SEGUNDOS:.0f}s (RPC pode nao ter "
+                f"indexado a conta ainda)[/dim]"
+            )
+            return False
 
     # Checklist binaria (substitui o score heuristico neste modo)
     passou, motivo = _passa_checklist_caveira(dados)
@@ -706,32 +741,73 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     return False
 
 
+# Traduz o motivo estrutural de indisponibilidade dos dados on-chain
+# (ver _buscar_mint_info_com_motivo) numa frase legivel no log/memoria.
+# Existe SO para a pessoa a ler o log ter a CERTEZA de qual foi (rate
+# limit do RPC vs conta confirmada ausente), em vez de teres de adivinhar
+# como aconteceu com o CWC - ver o diagnostico junto de _caveira_pendentes.
+_MOTIVOS_ONCHAIN_INDISPONIVEL = {
+    "rate_limit": "RPC rate-limitado (429 persistente) - NAO e evidencia de "
+                  "problema no token, e do RPC publico sob carga",
+    "conta_ausente": "conta do mint CONFIRMADA ausente no RPC (resposta "
+                      "valida, sem erro) - a esta idade, ja nao e um "
+                      "problema de indexacao lenta",
+    "erro_rpc": "erro RPC nao classificado (rede/timeout/resposta invalida)",
+}
+
+
+def _buscar_mint_info_com_motivo(mint: str) -> tuple[dict | None, str | None]:
+    """Chama rpc.get_mint_info(mint) e devolve (info, motivo). 'motivo' e
+    None quando info nao e None (sucesso); caso contrario e uma das
+    chaves de _MOTIVOS_ONCHAIN_INDISPONIVEL - a distincao que faltava
+    entre "RPC recusou-se a responder" e "conta confirmada ausente" (ver
+    o diagnostico do CWC junto de _caveira_pendentes). Antes, os dois
+    colapsavam no mesmo None e na mesma mensagem generica "dados on-chain
+    indisponiveis", tornando impossivel saber qual dos dois aconteceu SO
+    pelo log."""
+    try:
+        info = rpc.get_mint_info(mint)
+    except rpc.RPCRateLimit:
+        return None, "rate_limit"
+    except rpc.RPCError:
+        return None, "erro_rpc"
+    if info is None:
+        return None, "conta_ausente"
+    return info, None
+
+
 def _reprocessar_caveira_pendentes() -> None:
     """Processa a fila de retentativa do Caveira (ver _caveira_pendentes
-    em tentar_comprar_sniper_rapido). Chamada uma vez por ciclo principal
-    - com WebSocket ativo isso e a cada ~2s, por isso um atraso de 6-8s
-    fica coberto em 3-4 chamadas, sem nenhum sleep bloqueante.
+    em tentar_comprar_sniper_rapido). Chamada pela thread dedicada
+    _loop_retentativas_caveira a cada _INTERVALO_RETENTATIVA_CAVEIRA_
+    SEGUNDOS, SEMPRE - ja nao depende da duracao do ciclo principal (ver
+    o diagnostico do CWC no comentario junto de _caveira_pendentes).
 
     Para cada mint cujo tempo de espera ja passou: busca os dados on-chain
     (mint/freeze authority) DE NOVO - por essa altura o RPC ja deve ter
     indexado a conta - e tenta a compra outra vez, com o marcador
     "_caveira_retentativa" para garantir UMA SO retentativa por mint
-    (se ainda vier sem dados, e reprovado a serio, como sempre foi).
+    (se ainda vier sem dados, e reprovado a serio, como sempre foi - mas
+    agora com o MOTIVO especifico registado, nao so "indisponivel").
 
-    Nunca levanta - uma falha aqui nao pode derrubar o ciclo principal."""
+    Nunca levanta - uma falha aqui nao pode derrubar a thread de
+    retentativas nem o ciclo principal."""
     if not _caveira_pendentes:
         return
     if not config.SNIPER_RAPIDO_ATIVO:
         # Modo desligado entretanto - a fila perdeu o sentido
-        _caveira_pendentes.clear()
+        with _lock_caveira_pendentes:
+            _caveira_pendentes.clear()
         return
 
-    prontos = [
-        mint for mint, info in _caveira_pendentes.items()
-        if time.monotonic() - info["detectado_em"] >= config.CAVEIRA_ATRASO_MINIMO_SEGUNDOS
-    ]
-    for mint in prontos:
-        info = _caveira_pendentes.pop(mint)
+    with _lock_caveira_pendentes:
+        prontos = [
+            mint for mint, info in _caveira_pendentes.items()
+            if time.monotonic() - info["detectado_em"] >= config.CAVEIRA_ATRASO_MINIMO_SEGUNDOS
+        ]
+        infos_prontos = {mint: _caveira_pendentes.pop(mint) for mint in prontos}
+
+    for mint, info in infos_prontos.items():
         dados = info["dados"]
         try:
             # Ja foi comprado por outro caminho entretanto (normal/curva/
@@ -748,15 +824,19 @@ def _reprocessar_caveira_pendentes() -> None:
             # completa (holders/liquidez bloqueada/deployer): e so isto
             # que a checklist do Caveira precisa, e mantem a retentativa
             # barata (1 RPC, ja passa pelo limitador global em rpc.py)
-            import rpc
-            try:
-                info_mint = rpc.get_mint_info(mint)
-            except Exception:
-                info_mint = None
+            info_mint, motivo_indisponivel = _buscar_mint_info_com_motivo(mint)
             if info_mint is not None:
                 dados["onchain_disponivel"] = True
                 dados["mint_authority"] = info_mint["mint_authority"]
                 dados["freeze_authority"] = info_mint["freeze_authority"]
+                dados["onchain_motivo_indisponivel"] = None
+            else:
+                dados["onchain_motivo_indisponivel"] = motivo_indisponivel
+                alerts.info(
+                    f"[dim][💀 sniper] retentativa de {dados.get('token_simbolo', mint[:8])} "
+                    f"ainda sem dados on-chain apos {espera_seg:.0f}s de espera - "
+                    f"{_MOTIVOS_ONCHAIN_INDISPONIVEL.get(motivo_indisponivel, motivo_indisponivel)}[/dim]"
+                )
 
             dados["_caveira_retentativa"] = True  # nunca reagenda 2a vez
             comprou = tentar_comprar_sniper_rapido(dados)
@@ -771,6 +851,32 @@ def _reprocessar_caveira_pendentes() -> None:
         except Exception as e:
             alerts.info(f"[red][💀 sniper] falha ao reprocessar retentativa de "
                         f"{dados.get('token_simbolo', mint[:8])}:[/red] {e}")
+
+
+def _loop_retentativas_caveira() -> None:
+    """Thread dedicada as retentativas do Caveira - DESACOPLADA do ciclo
+    principal de proposito (ver o diagnostico do CWC no comentario junto
+    de _caveira_pendentes: antes, a fila so era revisitada 1x por volta
+    do "while True" em main(), e essa volta podia demorar minutos com
+    varios tokens a analisar). Corre para sempre, verificando a fila a
+    cada _INTERVALO_RETENTATIVA_CAVEIRA_SEGUNDOS, SEMPRE - mesmo que o
+    ciclo principal esteja preso numa chamada RPC lenta.
+
+    Ao contrario do Copy Trading (que so RECOLHE sinais numa thread e
+    deixa o ciclo principal executar a compra a serio), esta thread FAZ a
+    compra a serio quando a retentativa passa - por isso os ficheiros que
+    toca (posicoes.json/carteira.json/sniper_rapido.json) precisaram de
+    um lock interno (ver posicoes.py/carteira.py/sniper_rapido.py): e a
+    1a vez que mais que uma thread pode escrever neles ao mesmo tempo.
+
+    Daemon (arrancada com daemon=True em main()) - nao impede o processo
+    de terminar no Ctrl+C/SIGTERM, tal como o WebSocket e o Copy Trading."""
+    while True:
+        time.sleep(_INTERVALO_RETENTATIVA_CAVEIRA_SEGUNDOS)
+        try:
+            _reprocessar_caveira_pendentes()
+        except Exception as e:
+            alerts.info(f"[red]Erro na thread de retentativas do Caveira:[/red] {e}")
 
 
 def vender_sniper_se_score_mau(dados: dict, analise_ia: dict) -> None:
@@ -1531,6 +1637,19 @@ def main() -> None:
         except Exception as e:
             alerts.info(f"[red]Nao consegui iniciar o Copy Trading:[/red] {e}")
 
+    # Retentativas do Caveira: thread dedicada, DESACOPLADA do ciclo
+    # principal (ver o diagnostico do CWC no comentario junto de
+    # _caveira_pendentes). So arranca com Fase 2 configurada - sem
+    # wallet nao ha trading nenhum, o modo caveira nem sequer compra.
+    if config.fase2_configurada():
+        threading.Thread(
+            target=_loop_retentativas_caveira, daemon=True
+        ).start()
+        alerts.console.print(
+            f"[dim]Retentativas do Caveira: thread dedicada a cada "
+            f"{_INTERVALO_RETENTATIVA_CAVEIRA_SEGUNDOS:.0f}s.[/dim]"
+        )
+
     ciclo = 0
     ultima_verificacao_posicoes = 0.0
 
@@ -1587,17 +1706,6 @@ def main() -> None:
                     tentar_copy_trade(sinal)
             except Exception as e:
                 alerts.info(f"[red]Erro no Copy Trading:[/red] {e}")
-
-        # Retentativas do Caveira (tokens que ficaram sem dados on-chain
-        # so por serem jovens demais para o RPC ja ter indexado - ver
-        # _passa_checklist_caveira). Corre TODO ciclo (barato quando a
-        # fila esta vazia); com WebSocket ativo o ciclo e a cada ~2s, o
-        # suficiente para cobrir CAVEIRA_ATRASO_MINIMO_SEGUNDOS em poucas
-        # voltas, sem nenhum sleep bloqueante.
-        try:
-            _reprocessar_caveira_pendentes()
-        except Exception as e:
-            alerts.info(f"[red]Erro a reprocessar retentativas do Caveira:[/red] {e}")
 
         if not novos:
             alerts.info(f"[dim]ciclo {ciclo}: sem tokens novos. A aguardar {config.POLL_INTERVAL_SEGUNDOS}s...[/dim]")

@@ -21,11 +21,23 @@ comeca do zero.
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 
 import config
 
 FICHEIRO_ESTADO = "sniper_rapido.json"
+
+# Mesma razao do _lock em posicoes.py/carteira.py: a retentativa do
+# Caveira corre agora na sua propria thread (main.py:
+# _loop_retentativas_caveira) e tambem chama registar_gasto(). So protege
+# o ficheiro contra escrita corrompida por duas threads em simultaneo -
+# NAO fecha a janela (pequena e de baixo risco: no maximo 1 compra do
+# sniper, tipicamente $1, a mais que o limite diario) entre um pode_gastar()
+# e o registar_gasto() correspondente, chamados em dois momentos
+# separados por main.py - fechar essa janela exigiria expor o lock a
+# main.py, mais complexidade do que o risco justifica aqui.
+_lock = threading.Lock()
 
 
 def _hoje() -> str:
@@ -84,10 +96,11 @@ def registar_gasto(valor_usd: float) -> None:
     """Soma 'valor_usd' ao gasto de hoje. Chamar SO depois de uma compra
     do sniper ter mesmo sido efetuada (nao antes, nao em tentativas
     falhadas)."""
-    dados = _carregar()
-    dados["gasto_usd"] += valor_usd
-    dados["compras_hoje"] += 1
-    _guardar(dados)
+    with _lock:
+        dados = _carregar()
+        dados["gasto_usd"] += valor_usd
+        dados["compras_hoje"] += 1
+        _guardar(dados)
 
 
 # --------------------------------------------------------------------------

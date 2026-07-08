@@ -6,9 +6,20 @@ Guarda o estado do que o bot "comprou" (real ou simulado) num ficheiro JSON.
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 
 import config
+
+# Protege o ciclo carregar->modificar->guardar contra dois threads a
+# escreverem ao mesmo tempo (desde que a retentativa do Caveira passou a
+# correr na sua propria thread - ver main.py:_loop_retentativas_caveira -
+# ha pela primeira vez mais que uma thread capaz de comprar/vender e
+# tocar neste ficheiro). Sem isto, dois "carregar, alterar, guardar"
+# concorrentes podiam perder a escrita um do outro (o ultimo a guardar
+# "ganha", apagando a alteracao do outro sem erro nenhum - corrupcao
+# silenciosa do estado das posicoes).
+_lock = threading.Lock()
 
 
 def carregar_posicoes() -> dict:
@@ -52,30 +63,31 @@ def abrir_posicao(
     # guardados aqui para, ao VENDER, sabermos que valores repassar ao
     # historico (carteira.registar_venda) - as estatisticas por modo/DEX
     # do dashboard precisam disto tanto na compra como na venda.
-    posicoes = carregar_posicoes()
-    posicao = {
-        "mint": mint,
-        "simbolo": simbolo,
-        "valor_investido_usd": valor_investido_usd,
-        "preco_compra_usd": preco_compra_usd,
-        "quantidade_tokens": quantidade_tokens,
-        "decimais": decimais,
-        "dex": dex,
-        "modo": modo,
-        # Conta do pool/bonding curve (se soubermos) - usada pela deteccao
-        # de reversao (momentum.py) para EXCLUIR o pool das contagens de
-        # compra/venda. Sem isto, toda compra soma 1 "venda" do lado do
-        # pool (o pool perde saldo quando alguem compra) e vice-versa -
-        # o racio ficaria sempre ~1:1 por construcao, inutil como sinal.
-        "pool_address": pool_address,
-        "pico_preco_usd": preco_compra_usd,
-        "take_profit_disparado": False,
-        "timestamp_compra": datetime.now(timezone.utc).isoformat(),
-        "dry_run": dry_run,
-    }
-    posicoes[mint] = posicao
-    guardar_posicoes(posicoes)
-    return posicao
+    with _lock:
+        posicoes = carregar_posicoes()
+        posicao = {
+            "mint": mint,
+            "simbolo": simbolo,
+            "valor_investido_usd": valor_investido_usd,
+            "preco_compra_usd": preco_compra_usd,
+            "quantidade_tokens": quantidade_tokens,
+            "decimais": decimais,
+            "dex": dex,
+            "modo": modo,
+            # Conta do pool/bonding curve (se soubermos) - usada pela deteccao
+            # de reversao (momentum.py) para EXCLUIR o pool das contagens de
+            # compra/venda. Sem isto, toda compra soma 1 "venda" do lado do
+            # pool (o pool perde saldo quando alguem compra) e vice-versa -
+            # o racio ficaria sempre ~1:1 por construcao, inutil como sinal.
+            "pool_address": pool_address,
+            "pico_preco_usd": preco_compra_usd,
+            "take_profit_disparado": False,
+            "timestamp_compra": datetime.now(timezone.utc).isoformat(),
+            "dry_run": dry_run,
+        }
+        posicoes[mint] = posicao
+        guardar_posicoes(posicoes)
+        return posicao
 
 
 def fechar_posicao(mint: str, saida_usd: float | None = None,
@@ -85,11 +97,12 @@ def fechar_posicao(mint: str, saida_usd: float | None = None,
     venda FINAL (as vendas parciais anteriores ja estao acumuladas na
     propria posicao em 'valor_realizado_parcial_usd'). Os dois campos
     novos sao opcionais - chamadas antigas continuam a funcionar."""
-    posicoes = carregar_posicoes()
-    if mint in posicoes:
-        _registar_trade_fechado(posicoes[mint], saida_usd, motivo_saida)
-        del posicoes[mint]
-        guardar_posicoes(posicoes)
+    with _lock:
+        posicoes = carregar_posicoes()
+        if mint in posicoes:
+            _registar_trade_fechado(posicoes[mint], saida_usd, motivo_saida)
+            del posicoes[mint]
+            guardar_posicoes(posicoes)
 
 
 def _registar_trade_fechado(pos: dict, saida_usd, motivo_saida) -> None:
@@ -132,20 +145,22 @@ def _registar_trade_fechado(pos: dict, saida_usd, motivo_saida) -> None:
 
 
 def atualizar_posicao(mint: str, **campos) -> None:
-    posicoes = carregar_posicoes()
-    if mint not in posicoes:
-        return
-    posicoes[mint].update(campos)
-    guardar_posicoes(posicoes)
+    with _lock:
+        posicoes = carregar_posicoes()
+        if mint not in posicoes:
+            return
+        posicoes[mint].update(campos)
+        guardar_posicoes(posicoes)
 
 
 def atualizar_pico(mint: str, preco_atual_usd: float) -> None:
-    posicoes = carregar_posicoes()
-    if mint not in posicoes:
-        return
-    if preco_atual_usd > posicoes[mint].get("pico_preco_usd", 0):
-        posicoes[mint]["pico_preco_usd"] = preco_atual_usd
-        guardar_posicoes(posicoes)
+    with _lock:
+        posicoes = carregar_posicoes()
+        if mint not in posicoes:
+            return
+        if preco_atual_usd > posicoes[mint].get("pico_preco_usd", 0):
+            posicoes[mint]["pico_preco_usd"] = preco_atual_usd
+            guardar_posicoes(posicoes)
 
 
 def listar_posicoes_abertas() -> dict:

@@ -130,6 +130,14 @@ def analisar_onchain(pool_info: dict) -> dict:
 
     # -------- 1) Ler autoridades + supply do mint (dados criticos) --------
     onchain_disponivel = False
+    # PORQUE ficou indisponivel, nao so QUE ficou - "rate_limit" (RPC
+    # recusou por excesso de pedidos, nao prova nada sobre o token) e
+    # "conta_ausente" (RPC respondeu, a conta genuinamente nao existe)
+    # sao situacoes muito diferentes mas antes colapsavam ambas em
+    # onchain_disponivel=False sem distincao nenhuma - impossivel depois
+    # saber, so pelo log, qual delas aconteceu (ver o diagnostico do
+    # token CWC em main.py, junto de _caveira_pendentes).
+    onchain_motivo_indisponivel = None
     mint_authority = None
     freeze_authority = None
     supply = None
@@ -142,11 +150,15 @@ def analisar_onchain(pool_info: dict) -> dict:
             freeze_authority = info["freeze_authority"]
             supply = info["supply"]
             decimais = info["decimais"]
+        else:
+            onchain_motivo_indisponivel = "conta_ausente"
     except rpc.RPCRateLimit:
         # RPC recusou por excesso de pedidos -> seguimos sem estes dados
         onchain_disponivel = False
+        onchain_motivo_indisponivel = "rate_limit"
     except rpc.RPCError:
         onchain_disponivel = False
+        onchain_motivo_indisponivel = "erro_rpc"
 
     # -------- 2) Distribuicao de holders (uma chamada por token) --------
     # getTokenLargestAccounts devolve as 20 maiores contas do token.
@@ -212,6 +224,10 @@ def analisar_onchain(pool_info: dict) -> dict:
         "idade_minutos": pool_info["idade_minutos"],
         # On-chain
         "onchain_disponivel": onchain_disponivel,
+        # So preenchido quando onchain_disponivel e False - "rate_limit"
+        # vs "conta_ausente" vs "erro_rpc" (ver main.py:
+        # _MOTIVOS_ONCHAIN_INDISPONIVEL e o comentario acima em 1)).
+        "onchain_motivo_indisponivel": onchain_motivo_indisponivel,
         "mint_authority": mint_authority,
         "freeze_authority": freeze_authority,
         "supply": supply,
