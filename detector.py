@@ -23,20 +23,24 @@ import requests
 
 import config
 import html
-# Endpoint da GeckoTerminal que lista os pools mais recentes de uma rede.
+from conjunto_limitado import ConjuntoLimitado
+
+# Base da GeckoTerminal; a rede (solana/bsc) e escolhida por chamada.
 # Documentacao: https://www.geckoterminal.com/dex-api
-URL_NOVOS_POOLS = f"https://api.geckoterminal.com/api/v2/networks/{config.REDE}/new_pools"
+_BASE_GECKO = "https://api.geckoterminal.com/api/v2/networks"
 
 # A GeckoTerminal recomenda enviar este cabecalho para "fixar" a versao da API.
 CABECALHOS = {"Accept": "application/json;version=20230302"}
 
 
-def _sem_prefixo_rede(token_id: str) -> str:
-    """A API identifica tokens como 'solana_<mint>'. Aqui tiramos o 'solana_'.
+def _sem_prefixo_rede(token_id: str, rede: str) -> str:
+    """A API identifica tokens como '<rede>_<endereco>'. Aqui tiramos o
+    prefixo da rede certa.
 
-    Ex: 'solana_HTN638...' -> 'HTN638...'
+    Ex (solana): 'solana_HTN638...' -> 'HTN638...'
+    Ex (bsc)   : 'bsc_0x95ee...'    -> '0x95ee...'
     """
-    prefixo = f"{config.REDE}_"
+    prefixo = config.CHAINS[rede]["prefixo"]
     if token_id.startswith(prefixo):
         return token_id[len(prefixo):]
     return token_id
@@ -68,19 +72,50 @@ def _para_numero(valor) -> float | None:
         return None
 
 
-def _interpretar_pool(pool: dict) -> dict | None:
+def _extrair_atividade_recente(attrs: dict) -> dict:
+    """Traders unicos + volume da janela mais recente disponivel dos
+    campos 'transactions'/'volume_usd' da GeckoTerminal (confirmado nos
+    dados reais da API: cada campo tem m5/m15/m30/h1/h6/h24; para pools
+    recem-criados costumam vir todos iguais, porque toda a atividade
+    aconteceu dentro dos ultimos minutos).
+
+    Prefere a janela m5 (mais recente); cai para m15 SO se m5 vier
+    vazia/ausente. Devolve None nos campos que a API nao trouxe - NUNCA
+    inventa um 0, para o filtro (main.py) conseguir distinguir "sem
+    dados" de "zero real" (um pool com 0 compradores em m5 e diferente
+    de um pool sem essa janela reportada)."""
+    transacoes = attrs.get("transactions") or {}
+    volumes = attrs.get("volume_usd") or {}
+
+    janela_tx = transacoes.get("m5") or transacoes.get("m15") or {}
+    volume = _para_numero(volumes.get("m5"))
+    if volume is None:
+        volume = _para_numero(volumes.get("m15"))
+
+    return {
+        "compradores_unicos": janela_tx.get("buyers"),
+        "vendedores_unicos": janela_tx.get("sellers"),
+        "transacoes_compra": janela_tx.get("buys"),
+        "transacoes_venda": janela_tx.get("sells"),
+        "volume_usd_recente": volume,
+    }
+
+
+def _interpretar_pool(pool: dict, rede: str) -> dict | None:
     """Transforma o JSON cru de UM pool no nosso formato simples.
 
-    Devolve None se faltar informacao essencial (ex: sem token).
+    'rede' e "solana" ou "bsc" - decide o prefixo dos ids e quais os
+    tokens-base (o "outro lado" do par). Devolve None se faltar
+    informacao essencial (ex: sem token).
     """
     attrs = pool.get("attributes", {})
     rel = pool.get("relationships", {})
 
-    # Mints dos dois lados do par
+    # Enderecos dos dois lados do par (mint na Solana, contrato 0x na BSC)
     base_id = rel.get("base_token", {}).get("data", {}).get("id", "")
     quote_id = rel.get("quote_token", {}).get("data", {}).get("id", "")
-    base_mint = _sem_prefixo_rede(base_id)
-    quote_mint = _sem_prefixo_rede(quote_id)
+    base_mint = _sem_prefixo_rede(base_id, rede)
+    quote_mint = _sem_prefixo_rede(quote_id, rede)
 
     dex = rel.get("dex", {}).get("data", {}).get("id", "?")
 
@@ -90,44 +125,60 @@ def _interpretar_pool(pool: dict) -> dict | None:
     simbolo_base = partes[0] if len(partes) >= 1 else "?"
     simbolo_quote = partes[1] if len(partes) >= 2 else "?"
 
-    # Descobrir qual lado e o TOKEN NOVO:
-    # normalmente o lado "base" e o token novo e o "quote" e SOL/USDC.
-    # Mas se por acaso for ao contrario, invertemos.
-    if base_mint in config.MINTS_BASE_CONHECIDOS and quote_mint not in config.MINTS_BASE_CONHECIDOS:
+    # Descobrir qual lado e o TOKEN NOVO. Comparamos com os tokens-base
+    # DA REDE (em minusculas na BSC, pois os 0x nao sao case-sensitive).
+    bases = config.CHAINS[rede]["bases"]
+    base_norm = base_mint.lower() if rede == "bsc" else base_mint
+    quote_norm = quote_mint.lower() if rede == "bsc" else quote_mint
+    base_e_base = base_norm in bases
+    quote_e_base = quote_norm in bases
+
+    if base_e_base and not quote_e_base:
         token_mint, token_simbolo = quote_mint, simbolo_quote
         contra_mint, contra_simbolo = base_mint, simbolo_base
-    else:
+    elif quote_e_base and not base_e_base:
         token_mint, token_simbolo = base_mint, simbolo_base
         contra_mint, contra_simbolo = quote_mint, simbolo_quote
+    else:
+        # Nenhum lado e uma base conhecida (pool TOKEN/TOKEN) OU os DOIS
+        # sao (ex: pool SOL/USDC) - nao ha um lado claramente "o token
+        # novo". Adivinhar arrisca analisar/comprar o lado errado; mais
+        # seguro descartar este pool do que inventar (filosofia do bot:
+        # nunca fingir que sabemos o que nao sabemos).
+        return None
 
-    # Sem mint do token nao ha nada a analisar
+    # Sem endereco do token nao ha nada a analisar
     if not token_mint:
         return None
 
     return {
+        "chain": rede,                   # "solana" ou "bsc" (usado a jusante)
         "pool_address": attrs.get("address", "?"),
         "dex": dex,
         "nome_par": nome_par,
         "token_mint": token_mint,
         "token_simbolo": token_simbolo,
-        "contra_mint": contra_mint,      # o outro lado (SOL/USDC)
+        "contra_mint": contra_mint,      # o outro lado (SOL/BNB/estavel)
         "contra_simbolo": contra_simbolo,
         "liquidez_usd": _para_numero(attrs.get("reserve_in_usd")) or 0.0,
         "fdv_usd": _para_numero(attrs.get("fdv_usd")),
         "market_cap_usd": _para_numero(attrs.get("market_cap_usd")),
         "criado_em": attrs.get("pool_created_at", ""),
         "idade_minutos": round(_idade_minutos(attrs.get("pool_created_at", "")), 1),
+        **_extrair_atividade_recente(attrs),
     }
 
 
-def buscar_pools_crus(pagina: int = 1) -> list[dict]:
-    """Vai a API buscar a lista de pools recentes e devolve-a ja interpretada.
+def buscar_pools_crus(rede: str = "solana", pagina: int = 1) -> list[dict]:
+    """Vai a API buscar a lista de pools recentes DE UMA REDE e devolve-a
+    ja interpretada.
 
     NAO faz filtragem de "ja vistos" - isso e a classe DetectorPools que trata.
     Levanta requests.RequestException se a rede falhar (quem chama decide).
     """
+    gecko = config.CHAINS[rede]["gecko"]
     resposta = requests.get(
-        URL_NOVOS_POOLS,
+        f"{_BASE_GECKO}/{gecko}/new_pools",
         headers=CABECALHOS,
         params={"page": pagina},
         timeout=20,
@@ -137,7 +188,7 @@ def buscar_pools_crus(pagina: int = 1) -> list[dict]:
 
     pools = []
     for pool in dados:
-        interpretado = _interpretar_pool(pool)
+        interpretado = _interpretar_pool(pool, rede)
         if interpretado is not None:
             pools.append(interpretado)
     return pools
@@ -154,23 +205,27 @@ class DetectorPools:
             time.sleep(config.POLL_INTERVAL_SEGUNDOS)
     """
 
-    def __init__(self, emitir_no_arranque: int = 3):
-        # Conjunto de enderecos de pool ja processados (para nao repetir alertas)
-        self._vistos: set[str] = set()
+    def __init__(self, rede: str = "solana", emitir_no_arranque: int = 3):
+        # Que rede este detector monitoriza ("solana" ou "bsc")
+        self.rede = rede
+        # Enderecos de pool ja processados (para nao repetir alertas).
+        # Capacidade limitada: em 24/7 um set() normal cresceria para
+        # sempre (fuga de memoria lenta) - ver conjunto_limitado.py.
+        self._vistos = ConjuntoLimitado(capacidade=5000)
         # Na primeira vez, quantos pools recentes emitir logo (para veres
         # output imediato no arranque). Depois disso, so emite os genuinamente novos.
         self._emitir_no_arranque = emitir_no_arranque
         self._primeira_vez = True
 
     def buscar_novos(self) -> list[dict]:
-        """Devolve a lista de pools que ainda nao tinhamos visto.
+        """Devolve a lista de pools desta rede que ainda nao tinhamos visto.
 
         Se houver falha de rede, devolve lista vazia (nao rebenta o ciclo).
         """
         try:
-            pools = buscar_pools_crus()
+            pools = buscar_pools_crus(self.rede)
         except requests.RequestException as e:
-            print(f"[detector] aviso: falha ao buscar pools ({e})")
+            print(f"[detector:{self.rede}] aviso: falha ao buscar pools ({e})")
             return []
 
         novos = []
@@ -195,16 +250,18 @@ class DetectorPools:
 # Mostra os pools mais recentes que a API devolve agora.
 # --------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("A procurar pools recentes na Solana (GeckoTerminal)...\n")
+    import sys
+    rede = sys.argv[1] if len(sys.argv) > 1 else "solana"
+    print(f"A procurar pools recentes na rede '{rede}' (GeckoTerminal)...\n")
     try:
-        pools = buscar_pools_crus()
+        pools = buscar_pools_crus(rede)
     except requests.RequestException as e:
         print(f"Falha de rede: {e}")
         raise SystemExit(1)
 
     print(f"Encontrados {len(pools)} pools. A mostrar os 8 mais recentes:\n")
     for p in pools[:8]:
-        print(f"- [{p['dex']}] {p['nome_par']}")
+        print(f"- [{p['chain']}/{p['dex']}] {p['nome_par']}")
         print(f"    token : {p['token_simbolo']}  ({p['token_mint']})")
         print(f"    liquidez: ${p['liquidez_usd']:,.0f}  | idade: {p['idade_minutos']} min")
         print()

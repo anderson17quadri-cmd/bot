@@ -8,3 +8,31 @@ python-dotenv>=1.0    # ler variaveis de ambiente do ficheiro .env
 openai>=1.30          # cliente da Camada 1 (DeepSeek e compativel com a API OpenAI)
 anthropic>=0.34       # cliente da Camada 2 (Claude / Sonnet)
 rich>=13.7            # imprimir alertas bonitos e legiveis na consola
+
+# ============================================================
+# Dashboard web local (dashboard.py) - tambem pure-Python
+# ============================================================
+flask>=3.0            # servidor web do dashboard (localhost:5000)
+qrcode>=7.4           # QR code do endereco da wallet (pure-Python, SVG sem pillow)
+
+# ============================================================
+# Execucao Solana (Fase 2) - assinatura/leitura on-chain
+# solders e base58 sao OBRIGATORIOS: o main.py importa o executor.py
+# logo no arranque (mesmo em DRY_RUN), e este puxa o solders. Sem eles
+# o bot nao corre de todo. solders traz binarios pre-compilados (Rust)
+# para as plataformas comuns; no Termux puro pode ser preciso o proot.
+# ============================================================
+solders>=0.20       # keypair, assinatura e (de)serializacao de transacoes Solana
+base58>=2.1         # descodificar a WALLET_PRIVATE_KEY (formato base58)
+
+# ============================================================
+# BSC (Parte B) - assinatura de transacoes Ethereum, pure-Python
+# ============================================================
+eth-account>=0.11   # assinar swaps na PancakeSwap sem web3.py completo
+eth-abi>=4.0        # codificar/descodificar chamadas ao router PancakeSwap
+# (eth-utils vem como dependencia do eth-account; usado por executor_bsc)
+
+# ============================================================
+# Deteccao WebSocket (opcional, METODO_DETECCAO=websocket)
+# ============================================================
+websockets>=12.0    # logsSubscribe ao RPC (Helius) - deteccao instantanea pump.fun

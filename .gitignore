@@ -20,5 +20,16 @@ seen.json
 *.log
 carteira.json
 posicoes.json
+radar.json
+watchlist.json
+sniper_rapido.json
+copy_trade.json
+vistos_recentemente.json
+bot.pid
+# Memoria semanal (dados de execucao, nao codigo) - fica so no aparelho
+memoria/
 wallet.py.*
 gerar_wallet.py
+
+# Chave de sessao do dashboard (assina os cookies de login) - NUNCA versionar
+.dashboard_secret

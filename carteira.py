@@ -22,11 +22,19 @@ Ficheiro local: carteira.json
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 
 import config
 
 FICHEIRO_CARTEIRA = "carteira.json"
+
+# Mesma razao do _lock em posicoes.py: desde que a retentativa do Caveira
+# passou a correr na sua propria thread (main.py:_loop_retentativas_caveira),
+# ha mais que uma thread capaz de debitar/creditar o saldo virtual ao
+# mesmo tempo - sem lock, um "carregar, alterar, guardar" concorrente
+# podia perder a escrita do outro (saldo incorreto, sem erro nenhum).
+_lock = threading.Lock()
 
 
 def _carregar() -> dict:
@@ -59,34 +67,165 @@ def saldo_disponivel() -> float:
     return _carregar()["saldo_atual_usd"]
 
 
-def registar_compra(simbolo: str, valor_usd: float) -> bool:
+def _sanidade_ok(valor_usd: float, operacao: str, simbolo: str) -> bool:
+    """Rede de seguranca contra bugs de unidades (ex: uma quantidade de
+    tokens - um numero na casa dos milhares de milhoes - usada por engano
+    como se fosse valor em USD). Ja aconteceu: saldo simulado saltou de
+    $200 para $212,009 numa unica operacao.
+
+    Rejeita QUALQUER compra/venda cujo valor absoluto exceda
+    config.limite_sanidade_trade_usd() (por defeito, 50x o maior limite
+    de trade configurado entre os 3 modos - generoso, so apanha
+    corrupcoes de ordens de grandeza, nunca trades legitimos)."""
+    limite = config.limite_sanidade_trade_usd()
+    if abs(valor_usd) <= limite:
+        return True
+    print(
+        f"[carteira] ERRO DE SANIDADE: {operacao} de {simbolo} rejeitada - "
+        f"valor ${valor_usd:,.2f} excede o limite de seguranca (${limite:,.2f}, "
+        f"50x o maior MAX_TRADE_USD configurado). Isto cheira a bug de unidades "
+        f"(preco/quantidade trocados) - a operacao NAO foi aplicada ao saldo."
+    )
+    return False
+
+
+def registar_compra(simbolo: str, valor_usd: float, mint: str | None = None,
+                    preco_unitario_usd: float | None = None,
+                    quantidade_tokens: float | None = None,
+                    chain: str = "solana",
+                    dex: str | None = None,
+                    modo: str = "normal",
+                    liquidez_usd: float | None = None,
+                    idade_minutos_compra: float | None = None,
+                    top_holder_pct: float | None = None,
+                    holders_disponivel: bool | None = None) -> bool:
     """Debita o valor da compra do saldo virtual. Devolve False (e nao
-    debita nada) se nao houver saldo suficiente."""
-    dados = _carregar()
-    if dados["saldo_atual_usd"] < valor_usd:
+    debita nada) se nao houver saldo suficiente OU se o valor falhar a
+    verificacao de sanidade (protecao contra bugs de unidades).
+
+    Os campos extra sao opcionais (registos antigos nao os tem):
+      mint               -> para o dashboard abrir o grafico do token
+      preco_unitario_usd -> preco pago por unidade minima do token
+      quantidade_tokens  -> quantas unidades minimas foram compradas
+      dex                -> plataforma/DEX de origem (pump-fun, raydium...)
+      modo               -> qual dos 4 modos de compra fez esta operacao
+                            (normal|bonding_curve|sniper_rapido|copy_trading)
+                            - usado pelas estatisticas "por modo"/"por DEX"
+      liquidez_usd, idade_minutos_compra, top_holder_pct, holders_disponivel
+                         -> "fotografia" das condicoes do token NO MOMENTO
+                            da compra. Adicionados apos o diagnostico do
+                            Modo Caveira - sem isto, era impossivel olhar
+                            para tras e perceber que tipo de token estava
+                            a perder dinheiro (so ficava dex/modo, nao as
+                            condicoes de mercado). Usado por
+                            diagnostico_caveira.py.
+    Assim o historico fica completo mesmo depois de a posicao fechar."""
+    if not _sanidade_ok(valor_usd, "compra", simbolo):
         return False
 
-    dados["saldo_atual_usd"] -= valor_usd
-    dados["historico"].append({
-        "tipo": "compra", "simbolo": simbolo, "valor_usd": valor_usd,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
-    _guardar(dados)
-    return True
+    with _lock:
+        dados = _carregar()
+        if dados["saldo_atual_usd"] < valor_usd:
+            return False
+
+        dados["saldo_atual_usd"] -= valor_usd
+        dados["historico"].append({
+            "tipo": "compra", "simbolo": simbolo, "valor_usd": valor_usd,
+            "mint": mint, "chain": chain, "dex": dex, "modo": modo,
+            "preco_unitario_usd": preco_unitario_usd,
+            "quantidade_tokens": quantidade_tokens,
+            "liquidez_usd": liquidez_usd,
+            "idade_minutos_compra": idade_minutos_compra,
+            "top_holder_pct": top_holder_pct,
+            "holders_disponivel": holders_disponivel,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        _guardar(dados)
+        return True
 
 
-def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd: float) -> None:
+def registar_venda(simbolo: str, valor_recebido_usd: float, valor_investido_usd: float,
+                   mint: str | None = None,
+                   preco_compra_usd: float | None = None,
+                   preco_venda_usd: float | None = None,
+                   quantidade_tokens: float | None = None,
+                   chain: str = "solana",
+                   sniper_rapido: bool = False,
+                   dex: str | None = None,
+                   modo: str | None = None) -> bool:
     """Credita o valor recebido da venda no saldo virtual e regista o
-    lucro/prejuizo realizado dessa operacao."""
-    dados = _carregar()
-    lucro = valor_recebido_usd - valor_investido_usd
-    dados["saldo_atual_usd"] += valor_recebido_usd
-    dados["historico"].append({
-        "tipo": "venda", "simbolo": simbolo,
-        "valor_usd": valor_recebido_usd, "lucro_usd": round(lucro, 4),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
-    _guardar(dados)
+    lucro/prejuizo realizado dessa operacao. Devolve False (e nao mexe
+    no saldo) se o valor falhar a verificacao de sanidade - protecao
+    contra bugs de unidades (ex: cotacao de um pool manipulado/ilíquido
+    a devolver um numero absurdo).
+
+    IMPORTANTE: se isto devolver False, quem chamou NAO deve fechar nem
+    reduzir a posicao - o "dinheiro" simulado nunca chegou a entrar, por
+    isso a posicao continua aberta para tentares vender outra vez depois.
+
+    Os campos extra (opcionais) preservam o que a posicao sabia ANTES
+    de ser apagada pelo fechar_posicao(): o mint, o preco a que se
+    comprou, o preco a que se vendeu e a quantidade vendida - sem isto,
+    fechada a posicao, esses dados perdiam-se para sempre.
+
+    'dex'/'modo': mesmo par usado em registar_compra, para as estatisticas
+    do dashboard conseguirem juntar compra+venda do mesmo modo/plataforma.
+    'modo' sem valor explicito e deduzido de 'sniper_rapido' (compat com
+    chamadas antigas que so passavam esse booleano)."""
+    if not _sanidade_ok(valor_recebido_usd, "venda", simbolo):
+        return False
+
+    if modo is None:
+        modo = "sniper_rapido" if sniper_rapido else "normal"
+
+    with _lock:
+        dados = _carregar()
+        lucro = valor_recebido_usd - valor_investido_usd
+        dados["saldo_atual_usd"] += valor_recebido_usd
+        dados["historico"].append({
+            "tipo": "venda", "simbolo": simbolo,
+            "valor_usd": valor_recebido_usd, "lucro_usd": round(lucro, 4),
+            "mint": mint, "chain": chain, "dex": dex, "modo": modo,
+            "preco_compra_usd": preco_compra_usd,
+            "preco_venda_usd": preco_venda_usd,
+            "quantidade_tokens": quantidade_tokens,
+            "sniper_rapido": sniper_rapido,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        _guardar(dados)
+        return True
+
+
+def marcar_ultima_compra(mint: str, **campos) -> None:
+    """Acrescenta campos extra a entrada de COMPRA mais recente de um
+    mint (ex: sniper_rapido=True). Usado por modos de compra dedicados
+    (ex: sniper_rapido.py) que reutilizam o executor.comprar_token
+    partilhado mas querem marcar a origem SO no seu proprio codigo, sem
+    mexer na assinatura da funcao de compra partilhada."""
+    with _lock:
+        dados = _carregar()
+        for h in reversed(dados["historico"]):
+            if h.get("tipo") == "compra" and h.get("mint") == mint:
+                h.update(campos)
+                _guardar(dados)
+                return
+
+
+def remover_do_historico(timestamp: str) -> bool:
+    """Remove UMA entrada do historico pelo seu timestamp (identificador
+    estavel - ao contrario do indice, que muda com a ordenacao no ecra).
+
+    NAO mexe no saldo: e so limpeza visual do historico, a pedido do
+    utilizador. Devolve True se removeu algo, False se nao encontrou.
+    """
+    with _lock:
+        dados = _carregar()
+        antes = len(dados["historico"])
+        dados["historico"] = [h for h in dados["historico"] if h.get("timestamp") != timestamp]
+        if len(dados["historico"]) == antes:
+            return False  # nao encontrou nenhuma entrada com esse timestamp
+        _guardar(dados)
+        return True
 
 
 def relatorio(valor_posicoes_abertas_usd: float = 0.0) -> str:
