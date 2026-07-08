@@ -72,6 +72,35 @@ def _para_numero(valor) -> float | None:
         return None
 
 
+def _extrair_atividade_recente(attrs: dict) -> dict:
+    """Traders unicos + volume da janela mais recente disponivel dos
+    campos 'transactions'/'volume_usd' da GeckoTerminal (confirmado nos
+    dados reais da API: cada campo tem m5/m15/m30/h1/h6/h24; para pools
+    recem-criados costumam vir todos iguais, porque toda a atividade
+    aconteceu dentro dos ultimos minutos).
+
+    Prefere a janela m5 (mais recente); cai para m15 SO se m5 vier
+    vazia/ausente. Devolve None nos campos que a API nao trouxe - NUNCA
+    inventa um 0, para o filtro (main.py) conseguir distinguir "sem
+    dados" de "zero real" (um pool com 0 compradores em m5 e diferente
+    de um pool sem essa janela reportada)."""
+    transacoes = attrs.get("transactions") or {}
+    volumes = attrs.get("volume_usd") or {}
+
+    janela_tx = transacoes.get("m5") or transacoes.get("m15") or {}
+    volume = _para_numero(volumes.get("m5"))
+    if volume is None:
+        volume = _para_numero(volumes.get("m15"))
+
+    return {
+        "compradores_unicos": janela_tx.get("buyers"),
+        "vendedores_unicos": janela_tx.get("sellers"),
+        "transacoes_compra": janela_tx.get("buys"),
+        "transacoes_venda": janela_tx.get("sells"),
+        "volume_usd_recente": volume,
+    }
+
+
 def _interpretar_pool(pool: dict, rede: str) -> dict | None:
     """Transforma o JSON cru de UM pool no nosso formato simples.
 
@@ -136,6 +165,7 @@ def _interpretar_pool(pool: dict, rede: str) -> dict | None:
         "market_cap_usd": _para_numero(attrs.get("market_cap_usd")),
         "criado_em": attrs.get("pool_created_at", ""),
         "idade_minutos": round(_idade_minutos(attrs.get("pool_created_at", "")), 1),
+        **_extrair_atividade_recente(attrs),
     }
 
 

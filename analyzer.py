@@ -226,6 +226,18 @@ def analisar_onchain(pool_info: dict) -> dict:
         "deployer": deployer,
         "deployer_tokens_criados": deployer_tokens_criados,
         "liquidez_suspeita": liquidez_suspeita,
+        # Atividade de trading recente (GeckoTerminal, capturada no
+        # detector.py) - None quando a API nao trouxe a janela (o
+        # detector.py so promete m5/m15; nunca inventa um 0). Ausente
+        # tambem quando o pool veio do detector_websocket.py (esse
+        # caminho nao consulta a GeckoTerminal, so decodifica o evento
+        # on-chain) - o filtro em main.py trata os dois casos da mesma
+        # forma (fail-open, ver _filtro_atividade_recente).
+        "compradores_unicos": pool_info.get("compradores_unicos"),
+        "vendedores_unicos": pool_info.get("vendedores_unicos"),
+        "transacoes_compra": pool_info.get("transacoes_compra"),
+        "transacoes_venda": pool_info.get("transacoes_venda"),
+        "volume_usd_recente": pool_info.get("volume_usd_recente"),
     }
 
     # -------- 5) Calcular score heuristico --------

@@ -241,6 +241,13 @@ def _registar_decisao_memoria(dados: dict, analise_ia: dict | None,
             "provider_ia": (analise_ia or {}).get("provider_ia", "heuristico"),
             "decisao": decisao,
             "motivo_rejeicao": motivo_rejeicao,
+            # Atividade de trading recente (traders unicos + volume da
+            # janela mais recente) - None quando a GeckoTerminal nao
+            # trouxe essa janela para o pool. Guardado sempre (mesmo em
+            # compras) para poder analisar depois se o filtro esta
+            # calibrado bem (ver _filtro_atividade_recente).
+            "traders_unicos": dados.get("compradores_unicos"),
+            "volume_usd_recente": dados.get("volume_usd_recente"),
         })
     except Exception as e:
         alerts.info(f"[dim][memoria] falha ao registar decisao: {e}[/dim]")
@@ -254,22 +261,48 @@ def _registar_decisao_memoria(dados: dict, analise_ia: dict | None,
 # para a rejeicao/registo a serio). Isto evita duplicar limiares em dois
 # sitios que podiam desalinhar-se com o tempo.
 # ============================================================================
+def _filtro_atividade_recente(dados: dict) -> tuple[bool, str | None]:
+    """Traders unicos + volume da janela mais recente (m5/m15, capturados
+    em detector.py a partir de "transactions"/"volume_usd" da
+    GeckoTerminal) - exige alguma atividade GENUINA, para nao comprar
+    tokens que so passam nos outros filtros (liquidez/holders) mas nao
+    tem ninguem realmente a negociar.
+
+    FAIL-OPEN (nao rejeita) quando o dado nao esta disponivel: um pool
+    sem esta janela (API ainda nao indexou, ou o pool veio do
+    detector_websocket.py, que nunca consulta a GeckoTerminal) NAO e um
+    sinal de perigo - so falta de informacao para ESTE filtro em
+    particular, por isso deixa os outros filtros (liquidez, autoridades,
+    holders) decidirem. Ver justificacao completa na mensagem que
+    acompanha este commit."""
+    compradores = dados.get("compradores_unicos")
+    volume = dados.get("volume_usd_recente")
+
+    if compradores is not None and compradores < config.TRADERS_UNICOS_MINIMO:
+        return False, (f"traders unicos: {compradores} < minimo "
+                       f"{config.TRADERS_UNICOS_MINIMO}")
+    if volume is not None and volume < config.VOLUME_MINIMO_USD:
+        return False, (f"volume ${volume:,.0f} < minimo "
+                       f"${config.VOLUME_MINIMO_USD:,.0f}")
+    return True, None
+
+
 def _filtro_barato_normal(dados: dict) -> tuple[bool, str | None]:
-    """Piso de liquidez do caminho normal (Jupiter)."""
+    """Piso de liquidez do caminho normal (Jupiter) + atividade real."""
     liquidez = dados.get("liquidez_usd") or 0.0
     if liquidez < config.LIQUIDEZ_MINIMA_USD:
         return False, (f"liquidez ${liquidez:,.0f} < minima "
                        f"${config.LIQUIDEZ_MINIMA_USD:,.0f}")
-    return True, None
+    return _filtro_atividade_recente(dados)
 
 
 def _filtro_barato_curva(dados: dict) -> tuple[bool, str | None]:
-    """Atraso minimo desde o lancamento (caminho bonding curve)."""
+    """Atraso minimo desde o lancamento (bonding curve) + atividade real."""
     idade_seg = dados.get("idade_minutos", 0) * 60
     if idade_seg < config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS:
         return False, (f"idade {idade_seg:.0f}s < atraso minimo da curva "
                        f"{config.PUMPFUN_ATRASO_MINIMO_SEGUNDOS}s")
-    return True, None
+    return _filtro_atividade_recente(dados)
 
 
 def _filtro_barato_bsc(dados: dict) -> tuple[bool, str | None]:

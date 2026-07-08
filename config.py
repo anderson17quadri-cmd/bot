@@ -101,6 +101,21 @@ POLL_INTERVAL_SEGUNDOS = _env_int("POLL_INTERVAL_SEGUNDOS", 30)
 ZONA_AMBIGUA_MIN = _env_int("ZONA_AMBIGUA_MIN", 40)
 ZONA_AMBIGUA_MAX = _env_int("ZONA_AMBIGUA_MAX", 70)
 LIQUIDEZ_MINIMA_USD = _env_float("LIQUIDEZ_MINIMA_USD", 2000.0)
+# --- Filtro de atividade de trading real (traders unicos + volume) -----
+# Além da liquidez, exige alguma atividade GENUÍNA na janela mais recente
+# (m5, ou m15 se a m5 nao vier) devolvida pela GeckoTerminal em
+# "transactions"/"volume_usd" (ver detector.py:_extrair_atividade_recente).
+# Aplica-se so aos modos normal e bonding_curve (ver main.py); o Caveira
+# ja tem o seu proprio filtro de qualidade, mais apertado, via momentum.py.
+# FAIL-OPEN por desenho (ver main.py:_filtro_atividade_recente): se a API
+# nao trouxer esta janela para um pool, o filtro NAO rejeita - so avalia
+# quando ha dado para avaliar. Diferente do fail-closed usado em
+# honeypot/autoridades porque a ausencia aqui nao e um sinal de perigo (o
+# token nao fica "mais scam" por a GeckoTerminal ainda nao ter indexado
+# a janela), so significa "sem opiniao" - e ha outros filtros (liquidez,
+# autoridades, holders) a cobrir o risco de seguranca.
+TRADERS_UNICOS_MINIMO = _env_int("TRADERS_UNICOS_MINIMO", 3)
+VOLUME_MINIMO_USD = _env_float("VOLUME_MINIMO_USD", 500.0)
 MAX_ANALISES_POR_CICLO = _env_int("MAX_ANALISES_POR_CICLO", 5)
 PAUSA_ENTRE_TOKENS = _env_float("PAUSA_ENTRE_TOKENS", 1.0)
 # Um mint ja analisado (heuristico + IA) nao volta a ser processado
