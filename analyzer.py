@@ -119,16 +119,20 @@ def _calcular_score(dados: dict) -> tuple[int, list[str]]:
     return score, fatores
 
 
-def analisar_onchain(pool_info: dict) -> dict:
-    """Recebe um pool (do detector) e devolve o dicionario 'dados_token' completo.
+def ler_autoridades_mint(mint: str) -> dict:
+    """Le SO mint_authority/freeze_authority/supply/decimais (1 chamada
+    RPC: rpc.get_mint_info). Extraido de analisar_onchain() para ser
+    reutilizado tambem pelo caminho LEVE do Caveira (ver
+    analisar_onchain_leve_caveira, mais abaixo) e pela retentativa em
+    main.py (_reprocessar_caveira_pendentes) - fonte UNICA da distincao
+    "rate_limit" vs "conta_ausente" vs "erro_rpc", para nao voltar a
+    duplicar esta logica em 2 sitios que podiam divergir.
 
-    Este dicionario e depois:
-      - enviado as camadas de IA (ai_layer1 / ai_layer2)
-      - usado pelo alerts.py para mostrar o alerta
+    Devolve sempre os mesmos 6 campos, com defeitos seguros em caso de
+    falha (onchain_disponivel=False, resto None):
+      onchain_disponivel, onchain_motivo_indisponivel, mint_authority,
+      freeze_authority, supply, decimais.
     """
-    mint = pool_info["token_mint"]
-
-    # -------- 1) Ler autoridades + supply do mint (dados criticos) --------
     onchain_disponivel = False
     # PORQUE ficou indisponivel, nao so QUE ficou - "rate_limit" (RPC
     # recusou por excesso de pedidos, nao prova nada sobre o token) e
@@ -159,6 +163,92 @@ def analisar_onchain(pool_info: dict) -> dict:
     except rpc.RPCError:
         onchain_disponivel = False
         onchain_motivo_indisponivel = "erro_rpc"
+
+    return {
+        "onchain_disponivel": onchain_disponivel,
+        "onchain_motivo_indisponivel": onchain_motivo_indisponivel,
+        "mint_authority": mint_authority,
+        "freeze_authority": freeze_authority,
+        "supply": supply,
+        "decimais": decimais,
+    }
+
+
+def analisar_onchain_leve_caveira(pool_info: dict) -> dict:
+    """Versao LEVE de analisar_onchain(), usada SO pelo modo Sniper
+    Rapido/Caveira (main.py:tentar_comprar_sniper_rapido e
+    _reprocessar_caveira_pendentes) - NUNCA por normal/curva/BSC.
+
+    A checklist binaria do Caveira (main.py:_passa_checklist_caveira) so
+    usa 4 coisas: mint_authority, freeze_authority, liquidez_usd e
+    idade_minutos. As duas ultimas ja vem do detector.py, sem custo de
+    RPC nenhum - so as autoridades exigem uma chamada. Chamar
+    analisar_onchain() completo (que TAMBEM busca holders + sinais
+    avancados - liquidez bloqueada, historico do deployer, ate 6
+    chamadas RPC extra que a checklist nunca le) fazia o Caveira competir
+    pelo mesmo limitador global de RPC (rpc.py:_limitador_global) com
+    chamadas que o seu proprio caminho nem usa, e esperar por elas antes
+    de decidir - o oposto do "comprar antes da IA/analise completa
+    terminar" que e a razao de existir deste modo.
+
+    Devolve um dict com SO os campos que tentar_comprar_sniper_rapido/
+    _passa_checklist_caveira/_passa_filtro_qualidade_caveira/
+    _registar_decisao_memoria precisam - holders_disponivel fica sempre
+    False e top_holder_pct 0.0 (nunca inventados, e os consumidores ja
+    tratam a sua ausencia com seguranca, exatamente como quando o RPC
+    completo falha). NAO e um substituto geral de analisar_onchain() -
+    quem comprar por este caminho continua a ser reavaliado pela analise
+    completa a seguir (para a IA, o radar e a watchlist), este dict serve
+    SO para a decisao rapida do Caveira.
+    """
+    mint = pool_info["token_mint"]
+    autoridades = ler_autoridades_mint(mint)
+
+    return {
+        "token_simbolo": pool_info["token_simbolo"],
+        "token_mint": mint,
+        "chain": pool_info.get("chain", "solana"),
+        "dex": pool_info["dex"],
+        "pool_address": pool_info.get("pool_address"),
+        "liquidez_usd": pool_info["liquidez_usd"],
+        "idade_minutos": pool_info["idade_minutos"],
+        "onchain_disponivel": autoridades["onchain_disponivel"],
+        "onchain_motivo_indisponivel": autoridades["onchain_motivo_indisponivel"],
+        "mint_authority": autoridades["mint_authority"],
+        "freeze_authority": autoridades["freeze_authority"],
+        "decimais": autoridades["decimais"],
+        # Nunca calculados neste caminho leve - ausencia ja e tratada com
+        # seguranca por quem le (ver docstring acima).
+        "holders_disponivel": False,
+        "top_holder_pct": 0.0,
+        # Atividade de trading recente - vem do detector.py (GeckoTerminal),
+        # sem custo de RPC nenhum, por isso inclui-se aqui tambem (so para
+        # o registo em memoria - o Caveira nao usa _filtro_atividade_recente).
+        "compradores_unicos": pool_info.get("compradores_unicos"),
+        "vendedores_unicos": pool_info.get("vendedores_unicos"),
+        "transacoes_compra": pool_info.get("transacoes_compra"),
+        "transacoes_venda": pool_info.get("transacoes_venda"),
+        "volume_usd_recente": pool_info.get("volume_usd_recente"),
+    }
+
+
+def analisar_onchain(pool_info: dict) -> dict:
+    """Recebe um pool (do detector) e devolve o dicionario 'dados_token' completo.
+
+    Este dicionario e depois:
+      - enviado as camadas de IA (ai_layer1 / ai_layer2)
+      - usado pelo alerts.py para mostrar o alerta
+    """
+    mint = pool_info["token_mint"]
+
+    # -------- 1) Ler autoridades + supply do mint (dados criticos) --------
+    autoridades = ler_autoridades_mint(mint)
+    onchain_disponivel = autoridades["onchain_disponivel"]
+    onchain_motivo_indisponivel = autoridades["onchain_motivo_indisponivel"]
+    mint_authority = autoridades["mint_authority"]
+    freeze_authority = autoridades["freeze_authority"]
+    supply = autoridades["supply"]
+    decimais = autoridades["decimais"]
 
     # -------- 2) Distribuicao de holders (uma chamada por token) --------
     # getTokenLargestAccounts devolve as 20 maiores contas do token.

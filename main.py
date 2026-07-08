@@ -613,9 +613,10 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
     e chamado). Desde a simplificacao, tambem JA NAO usa o score
     heuristico - usa uma CHECKLIST BINARIA (ver _passa_checklist_caveira)
     diretamente sobre os dados on-chain rapidos (autoridades, liquidez,
-    idade), mais previsivel e rapida de avaliar. E chamada ANTES de
-    avaliar_com_ia() no processar_pool, exatamente para comprar antes da
-    IA (mais lenta) terminar.
+    idade), mais previsivel e rapida de avaliar. Chamada em processar_pool
+    com o dict LEVE de analyzer.analisar_onchain_leve_caveira() - ANTES
+    da analise on-chain completa E de avaliar_com_ia(), exatamente para
+    decidir sem esperar por nenhuma das duas (mais lentas).
 
     So Solana por agora (o mesmo mint tem de ser negociavel via Jupiter
     de imediato - a BSC e a bonding curve do pump.fun tem os seus
@@ -742,7 +743,7 @@ def tentar_comprar_sniper_rapido(dados: dict) -> bool:
 
 
 # Traduz o motivo estrutural de indisponibilidade dos dados on-chain
-# (ver _buscar_mint_info_com_motivo) numa frase legivel no log/memoria.
+# (ver analyzer.ler_autoridades_mint) numa frase legivel no log/memoria.
 # Existe SO para a pessoa a ler o log ter a CERTEZA de qual foi (rate
 # limit do RPC vs conta confirmada ausente), em vez de teres de adivinhar
 # como aconteceu com o CWC - ver o diagnostico junto de _caveira_pendentes.
@@ -754,26 +755,6 @@ _MOTIVOS_ONCHAIN_INDISPONIVEL = {
                       "problema de indexacao lenta",
     "erro_rpc": "erro RPC nao classificado (rede/timeout/resposta invalida)",
 }
-
-
-def _buscar_mint_info_com_motivo(mint: str) -> tuple[dict | None, str | None]:
-    """Chama rpc.get_mint_info(mint) e devolve (info, motivo). 'motivo' e
-    None quando info nao e None (sucesso); caso contrario e uma das
-    chaves de _MOTIVOS_ONCHAIN_INDISPONIVEL - a distincao que faltava
-    entre "RPC recusou-se a responder" e "conta confirmada ausente" (ver
-    o diagnostico do CWC junto de _caveira_pendentes). Antes, os dois
-    colapsavam no mesmo None e na mesma mensagem generica "dados on-chain
-    indisponiveis", tornando impossivel saber qual dos dois aconteceu SO
-    pelo log."""
-    try:
-        info = rpc.get_mint_info(mint)
-    except rpc.RPCRateLimit:
-        return None, "rate_limit"
-    except rpc.RPCError:
-        return None, "erro_rpc"
-    if info is None:
-        return None, "conta_ausente"
-    return info, None
 
 
 def _reprocessar_caveira_pendentes() -> None:
@@ -823,15 +804,18 @@ def _reprocessar_caveira_pendentes() -> None:
             # Busca fresca do mint - so isto, nao a analise on-chain
             # completa (holders/liquidez bloqueada/deployer): e so isto
             # que a checklist do Caveira precisa, e mantem a retentativa
-            # barata (1 RPC, ja passa pelo limitador global em rpc.py)
-            info_mint, motivo_indisponivel = _buscar_mint_info_com_motivo(mint)
-            if info_mint is not None:
-                dados["onchain_disponivel"] = True
-                dados["mint_authority"] = info_mint["mint_authority"]
-                dados["freeze_authority"] = info_mint["freeze_authority"]
-                dados["onchain_motivo_indisponivel"] = None
+            # barata (1 RPC, ja passa pelo limitador global em rpc.py).
+            # Mesma funcao partilhada usada pelo caminho leve inicial
+            # (analyzer.analisar_onchain_leve_caveira) - fonte unica da
+            # distincao rate_limit/conta_ausente/erro_rpc.
+            autoridades = analyzer.ler_autoridades_mint(mint)
+            dados["onchain_disponivel"] = autoridades["onchain_disponivel"]
+            dados["onchain_motivo_indisponivel"] = autoridades["onchain_motivo_indisponivel"]
+            if autoridades["onchain_disponivel"]:
+                dados["mint_authority"] = autoridades["mint_authority"]
+                dados["freeze_authority"] = autoridades["freeze_authority"]
             else:
-                dados["onchain_motivo_indisponivel"] = motivo_indisponivel
+                motivo_indisponivel = autoridades["onchain_motivo_indisponivel"]
                 alerts.info(
                     f"[dim][💀 sniper] retentativa de {dados.get('token_simbolo', mint[:8])} "
                     f"ainda sem dados on-chain apos {espera_seg:.0f}s de espera - "
@@ -1460,6 +1444,23 @@ def processar_pool(pool: dict) -> None:
         return
 
     chain = pool.get("chain", "solana")
+
+    # MODO SNIPER RAPIDO: corre AQUI, ANTES da analise on-chain completa
+    # (nao depois dela) - usa analisar_onchain_leve_caveira(), que so faz
+    # a UNICA chamada RPC que a checklist binaria precisa (autoridades do
+    # mint; liquidez/idade ja vem do detector, sem RPC), em vez de esperar
+    # pela analise completa (que TAMBEM busca holders + sinais avancados,
+    # ate 6 chamadas RPC extra que a checklist nunca le). Isto restaura o
+    # proposito do modo - comprar antes de qualquer analise mais lenta
+    # terminar - e reduz a pressao deste caminho especifico sobre o
+    # limitador global de RPC (rpc.py:_limitador_global), que e a causa
+    # dos 429 persistentes na checklist (ver _passa_checklist_caveira).
+    # So faz esta chamada extra quando o modo esta mesmo ativo (senao
+    # seria RPC gasto a toa) - BSC fica sempre de fora (modo e so Solana).
+    if config.SNIPER_RAPIDO_ATIVO and chain != "bsc" and config.fase2_configurada():
+        dados_leve_caveira = analyzer.analisar_onchain_leve_caveira(pool)
+        tentar_comprar_sniper_rapido(dados_leve_caveira)
+
     if chain == "bsc":
         import analyzer_bsc
         dados = analyzer_bsc.analisar(pool)
@@ -1478,12 +1479,6 @@ def processar_pool(pool: dict) -> None:
             cooldown.registar_analise(mint_bruto)
         except Exception as e:
             alerts.info(f"[yellow]Nao consegui registar o cooldown:[/yellow] {e}")
-
-    # MODO SNIPER RAPIDO: corre AQUI, logo apos a analise on-chain e ANTES
-    # da chamada a IA (mais lenta) - e literalmente o ponto do modo:
-    # comprar antes da analise completa terminar. So usa o score
-    # heuristico (dados["score_heuristico"]), nunca a IA.
-    tentar_comprar_sniper_rapido(dados)
 
     # Filtros baratos (liquidez, honeypot, taxas, holders, idade) ANTES da
     # IA: se ja sabemos que o token vai ser rejeitado por um destes, nao
